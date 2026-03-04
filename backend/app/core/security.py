@@ -11,14 +11,23 @@ from app.core.config import settings
 
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+MAX_BCRYPT_PASSWORD_BYTES = 72
+
+
+def _normalize_password_for_bcrypt(password: str) -> str:
+    # bcrypt only accepts up to 72 bytes. For longer secrets, hash first to a fixed-length value.
+    password_bytes = password.encode("utf-8")
+    if len(password_bytes) <= MAX_BCRYPT_PASSWORD_BYTES:
+        return password
+    return f"sha256${hashlib.sha256(password_bytes).hexdigest()}"
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    return pwd_context.hash(_normalize_password_for_bcrypt(password))
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    return pwd_context.verify(password, password_hash)
+    return pwd_context.verify(_normalize_password_for_bcrypt(password), password_hash)
 
 
 def create_access_token(user_id: int, username: str) -> str:
