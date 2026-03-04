@@ -52,6 +52,8 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
   `git pull` 后执行 `./start.sh build --no-cache backend && ./start.sh up -d backend`
 - 若出现 `ImportError: numpy.core.multiarray failed to import`，说明 `numpy/opencv` 二进制 ABI 不匹配：
   `git pull` 后执行 `./start.sh build --no-cache backend && ./start.sh up -d backend`
+- 若 `./start.sh deps` 报 `ResolutionImpossible` 且提示 `paddleocr ... depends on opencv-python<=4.6.0.66`，
+  说明本地约束和 PaddleOCR 依赖冲突，先 `git pull` 同步版本后重试 `./start.sh deps`。
 
 ## 数据挂载目录
 - PostgreSQL 数据: `stack/data/postgres`
