@@ -59,6 +59,10 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
   1. 这是 CUDA 运行时库未就绪（不是业务代码问题）；
   2. 已在 GPU 镜像里切到 `nvidia/cuda:11.8.0-cudnn8-devel` 并补充 `LD_LIBRARY_PATH`；
   3. 执行 `./start.sh build --no-cache backend && ./start.sh up -d backend`。
+- 若构建阶段报 `libcuda.so.1: cannot open shared object file`：
+  1. 这是构建上下文中没有宿主 NVIDIA 驱动库注入导致；
+  2. `libcuda.so.1` 应在容器运行时由 `nvidia-container-runtime` 注入；
+  3. 构建阶段可忽略该项，运行后用 `nvidia-smi` 和 OCR 实测确认。
 
 ## 数据挂载目录
 - PostgreSQL 数据: `stack/data/postgres`

@@ -30,9 +30,14 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt \
 import ctypes
 import numpy, cv2, paddle
 print('numpy', numpy.__version__, 'cv2', cv2.__version__, 'paddle', paddle.__version__)
-for lib in ("libcuda.so.1", "libcudnn.so.8", "libcublas.so.11", "libcublasLt.so.11", "libcudart.so.11.0"):
+for lib in ("libcudnn.so.8", "libcublas.so.11", "libcublasLt.so.11", "libcudart.so.11.0"):
     ctypes.CDLL(lib)
-print("cuda runtime libraries linked OK")
+print("build-time cuda user-space libraries linked OK")
+try:
+    ctypes.CDLL("libcuda.so.1")
+    print("runtime driver library libcuda.so.1 is visible at build time")
+except OSError:
+    print("libcuda.so.1 not visible at build time (expected); it is injected at runtime by nvidia-container-runtime")
 PY
 
 COPY backend /app
