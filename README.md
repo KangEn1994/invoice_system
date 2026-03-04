@@ -48,6 +48,8 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 - 也可以直接使用 `stack/start.sh`，它已内置 `docker-compose.yml + docker-compose.gpu.yml + docker-compose.live-code.yml`。
 - 若出现 `Can not import paddle core while this file exists`，请重建 `backend` 镜像一次（修复了 paddle CPU/GPU 包冲突）：
   `./start.sh build --no-cache backend && ./start.sh up -d backend`
+- 若出现 `ImportError: libGL.so.1: cannot open shared object file`，说明 OCR 依赖的 OpenCV 动态库缺失：
+  `git pull` 后执行 `./start.sh build --no-cache backend && ./start.sh up -d backend`
 
 ## 数据挂载目录
 - PostgreSQL 数据: `stack/data/postgres`

@@ -10,7 +10,7 @@ ARG PADDLE_WHL_URL=https://www.paddlepaddle.org.cn/packages/stable/cu118/
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
       python3 python3-pip python3-venv ca-certificates \
-      libglib2.0-0 libsm6 libxext6 libxrender1 libgomp1 \
+      libglib2.0-0 libgl1 libsm6 libxext6 libxrender1 libgomp1 \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3 /usr/local/bin/python \
     && ln -sf /usr/bin/pip3 /usr/local/bin/pip
