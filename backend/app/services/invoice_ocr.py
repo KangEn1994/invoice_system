@@ -14,25 +14,37 @@ logger = logging.getLogger(__name__)
 
 class InvoiceOCRService:
     def __init__(self) -> None:
-        self._ocr_engine = None
-        self._init_error: str | None = None
+        self._ocr_engine_gpu = None
+        self._ocr_engine_cpu = None
+        self._init_error_gpu: str | None = None
+        self._init_error_cpu: str | None = None
 
-    def _get_engine(self):
-        if self._ocr_engine is not None:
-            return self._ocr_engine
-        if self._init_error is not None:
-            raise RuntimeError(self._init_error)
+    def _get_engine(self, use_gpu: bool):
+        engine = self._ocr_engine_gpu if use_gpu else self._ocr_engine_cpu
+        init_error = self._init_error_gpu if use_gpu else self._init_error_cpu
+        if engine is not None:
+            return engine
+        if init_error is not None:
+            raise RuntimeError(init_error)
 
         try:
             from paddleocr import PaddleOCR  # type: ignore
 
-            self._ocr_engine = PaddleOCR(use_angle_cls=True, lang=settings.ocr_lang, use_gpu=settings.ocr_use_gpu)
-            logger.info("PaddleOCR initialized. use_gpu=%s lang=%s", settings.ocr_use_gpu, settings.ocr_lang)
-            return self._ocr_engine
+            engine = PaddleOCR(use_angle_cls=True, lang=settings.ocr_lang, use_gpu=use_gpu)
+            if use_gpu:
+                self._ocr_engine_gpu = engine
+            else:
+                self._ocr_engine_cpu = engine
+            logger.info("PaddleOCR initialized. use_gpu=%s lang=%s", use_gpu, settings.ocr_lang)
+            return engine
         except Exception as exc:  # pragma: no cover - runtime environment dependent
-            self._init_error = f"PaddleOCR init failed: {exc}"
-            logger.exception("PaddleOCR init failed. use_gpu=%s lang=%s", settings.ocr_use_gpu, settings.ocr_lang)
-            raise RuntimeError(self._init_error) from exc
+            err = f"PaddleOCR init failed: {exc}"
+            if use_gpu:
+                self._init_error_gpu = err
+            else:
+                self._init_error_cpu = err
+            logger.exception("PaddleOCR init failed. use_gpu=%s lang=%s", use_gpu, settings.ocr_lang)
+            raise RuntimeError(err) from exc
 
     def run(self, file_path: str) -> dict[str, Any]:
         path = Path(file_path)
@@ -46,8 +58,9 @@ class InvoiceOCRService:
                 "raw": {"error": "file not found"},
             }
 
+        preferred_gpu = settings.ocr_use_gpu
         try:
-            ocr = self._get_engine()
+            ocr = self._get_engine(use_gpu=preferred_gpu)
             result = ocr.ocr(str(path), cls=True)
             text = self._flatten_result_text(result)
             fields = self._extract_fields(text)
@@ -57,9 +70,44 @@ class InvoiceOCRService:
                 "error": None,
                 "fields": fields,
                 "raw_text": text,
-                "raw": {"text": text},
+                "raw": {"text": text, "used_gpu": preferred_gpu},
             }
         except Exception as exc:  # pragma: no cover - runtime environment dependent
+            if preferred_gpu:
+                logger.warning("GPU OCR failed, trying CPU fallback. file=%s error=%s", file_path, exc)
+                try:
+                    ocr_cpu = self._get_engine(use_gpu=False)
+                    result = ocr_cpu.ocr(str(path), cls=True)
+                    text = self._flatten_result_text(result)
+                    fields = self._extract_fields(text)
+                    return {
+                        "status": "success",
+                        "error": None,
+                        "fields": fields,
+                        "raw_text": text,
+                        "raw": {
+                            "text": text,
+                            "used_gpu": False,
+                            "fallback_from_gpu_error": str(exc),
+                        },
+                    }
+                except Exception as cpu_exc:  # pragma: no cover - runtime environment dependent
+                    logger.exception("OCR execution failed after CPU fallback. file=%s", file_path)
+                    return {
+                        "status": "failed",
+                        "error": str(cpu_exc),
+                        "fields": {},
+                        "raw_text": "",
+                        "raw": {
+                            "error": str(cpu_exc),
+                            "gpu_error": str(exc),
+                            "engine_init_error_gpu": self._init_error_gpu,
+                            "engine_init_error_cpu": self._init_error_cpu,
+                            "use_gpu": settings.ocr_use_gpu,
+                            "lang": settings.ocr_lang,
+                        },
+                    }
+
             logger.exception("OCR execution failed for file=%s", file_path)
             return {
                 "status": "failed",
@@ -68,7 +116,8 @@ class InvoiceOCRService:
                 "raw_text": "",
                 "raw": {
                     "error": str(exc),
-                    "engine_init_error": self._init_error,
+                    "engine_init_error_gpu": self._init_error_gpu,
+                    "engine_init_error_cpu": self._init_error_cpu,
                     "use_gpu": settings.ocr_use_gpu,
                     "lang": settings.ocr_lang,
                 },
@@ -78,19 +127,25 @@ class InvoiceOCRService:
         data: dict[str, Any] = {
             "use_gpu": settings.ocr_use_gpu,
             "lang": settings.ocr_lang,
-            "engine_initialized": self._ocr_engine is not None,
-            "init_error": self._init_error,
+            "engine_initialized_gpu": self._ocr_engine_gpu is not None,
+            "engine_initialized_cpu": self._ocr_engine_cpu is not None,
+            "init_error_gpu": self._init_error_gpu,
+            "init_error_cpu": self._init_error_cpu,
         }
         try:
-            self._get_engine()
+            self._get_engine(use_gpu=settings.ocr_use_gpu)
             data["ok"] = True
-            data["engine_initialized"] = True
-            data["init_error"] = self._init_error
+            data["engine_initialized_gpu"] = self._ocr_engine_gpu is not None
+            data["engine_initialized_cpu"] = self._ocr_engine_cpu is not None
+            data["init_error_gpu"] = self._init_error_gpu
+            data["init_error_cpu"] = self._init_error_cpu
         except Exception as exc:  # pragma: no cover - runtime environment dependent
             data["ok"] = False
             data["error"] = str(exc)
-            data["engine_initialized"] = self._ocr_engine is not None
-            data["init_error"] = self._init_error
+            data["engine_initialized_gpu"] = self._ocr_engine_gpu is not None
+            data["engine_initialized_cpu"] = self._ocr_engine_cpu is not None
+            data["init_error_gpu"] = self._init_error_gpu
+            data["init_error_cpu"] = self._init_error_cpu
         return data
 
     def _flatten_result_text(self, result: Any) -> str:

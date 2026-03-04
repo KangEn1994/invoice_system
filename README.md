@@ -54,6 +54,9 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
   `git pull` 后执行 `./start.sh build --no-cache backend && ./start.sh up -d backend`
 - 若 `./start.sh deps` 报 `ResolutionImpossible` 且提示 `paddleocr ... depends on opencv-python<=4.6.0.66`，
   说明本地约束和 PaddleOCR 依赖冲突，先 `git pull` 同步版本后重试 `./start.sh deps`。
+- 若出现 `Cannot load cudnn shared library`：
+  1. 临时恢复（不重建）：把 `stack/docker-compose.gpu.yml` 中 `OCR_USE_GPU` 改为 `"false"`，重启 backend；
+  2. 根治：`git pull` 后执行 `./start.sh build --no-cache backend && ./start.sh up -d backend`（已切到 CUDA 11.8 + cuDNN8 基线）。
 
 ## 数据挂载目录
 - PostgreSQL 数据: `stack/data/postgres`
