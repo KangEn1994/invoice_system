@@ -55,6 +55,10 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 - 若出现 `Cannot load cudnn shared library`：
   1. 临时恢复（不重建）：把 `stack/docker-compose.gpu.yml` 中 `OCR_USE_GPU` 改为 `"false"`，重启 backend；
   2. 根治：`git pull` 后执行 `./start.sh build --no-cache backend && ./start.sh up -d backend`（已切到 CUDA 11.8 + cuDNN8 基线）。
+- 若诊断命令显示 `libcublas.so.11` 或 `libcudart.so.11.0` 缺失：
+  1. 这是 CUDA 运行时库未就绪（不是业务代码问题）；
+  2. 已在 GPU 镜像里切到 `nvidia/cuda:11.8.0-cudnn8-devel` 并补充 `LD_LIBRARY_PATH`；
+  3. 执行 `./start.sh build --no-cache backend && ./start.sh up -d backend`。
 
 ## 数据挂载目录
 - PostgreSQL 数据: `stack/data/postgres`

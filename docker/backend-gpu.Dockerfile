@@ -1,8 +1,9 @@
-FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
+FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda/targets/x86_64-linux/lib:${LD_LIBRARY_PATH}
 
 ARG PADDLE_GPU_PACKAGE=paddlepaddle-gpu==2.6.2
 ARG PADDLE_WHL_URL=https://www.paddlepaddle.org.cn/packages/stable/cu118/
@@ -25,7 +26,14 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt \
     && pip uninstall -y paddlepaddle paddlepaddle-gpu || true \
     && pip install --no-cache-dir ${PADDLE_GPU_PACKAGE} -f ${PADDLE_WHL_URL} \
     && pip install --no-cache-dir --force-reinstall numpy==1.26.4 opencv-python==4.6.0.66 \
-    && python -c "import numpy, cv2, paddle; print('numpy', numpy.__version__, 'cv2', cv2.__version__, 'paddle', paddle.__version__)"
+    && python - <<'PY'
+import ctypes
+import numpy, cv2, paddle
+print('numpy', numpy.__version__, 'cv2', cv2.__version__, 'paddle', paddle.__version__)
+for lib in ("libcuda.so.1", "libcudnn.so.8", "libcublas.so.11", "libcublasLt.so.11", "libcudart.so.11.0"):
+    ctypes.CDLL(lib)
+print("cuda runtime libraries linked OK")
+PY
 
 COPY backend /app
 
