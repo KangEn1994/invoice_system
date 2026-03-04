@@ -1,0 +1,11 @@
+services:
+  backend:
+    volumes:
+      - ../backend:/app
+      - ./data/files:/data/files
+      - ./data/zip_cache:/data/zip_cache
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    volumes:
+      - ../frontend:/usr/share/nginx/html:ro

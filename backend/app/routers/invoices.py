@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import Select, and_, func, select
 from sqlalchemy.orm import Session, selectinload
@@ -290,12 +290,17 @@ def update_invoice(
     return _refresh_invoice(db, invoice_id)
 
 
-@router.delete("/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{invoice_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    response_model=None,
+)
 def delete_invoice(
     invoice_id: int,
     db: Session = Depends(get_db),
     _: AdminUser = Depends(get_current_admin),
-) -> None:
+) -> Response:
     invoice = db.get(Invoice, invoice_id)
     if not invoice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票不存在")
@@ -306,6 +311,7 @@ def delete_invoice(
 
     if file_path and os.path.exists(file_path):
         os.remove(file_path)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{invoice_id}/file")

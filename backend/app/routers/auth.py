@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -99,23 +99,29 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)) -> TokenResp
     return _build_token_response(db=db, user=user, session=session)
 
 
-@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-def logout(payload: LogoutRequest, db: Session = Depends(get_db)) -> None:
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    response_model=None,
+)
+def logout(payload: LogoutRequest, db: Session = Depends(get_db)) -> Response:
     try:
         token_payload = decode_token(payload.refresh_token)
         if token_payload.get("type") != "refresh":
-            return
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
         session_id = token_payload.get("sid")
         if not session_id:
-            return
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
         session = db.get(AuthSession, uuid.UUID(session_id))
         if not session:
-            return
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
         session.revoked_at = datetime.now(timezone.utc)
         db.add(session)
         db.commit()
     except Exception:
-        return
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/me", response_model=AdminMeResponse)

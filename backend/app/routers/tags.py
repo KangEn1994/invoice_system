@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -68,15 +68,21 @@ def update_tag(
     return tag
 
 
-@router.delete("/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{tag_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    response_model=None,
+)
 def delete_tag(
     tag_id: int,
     db: Session = Depends(get_db),
     _: AdminUser = Depends(get_current_admin),
-) -> None:
+) -> Response:
     tag = db.get(Tag, tag_id)
     if not tag:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="标签不存在")
 
     db.delete(tag)
     db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

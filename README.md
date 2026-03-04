@@ -51,6 +51,26 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 - 发票文件: `stack/data/files`
 - 分享 ZIP 缓存: `stack/data/zip_cache`
 
+## 开发模式（减少重建镜像）
+首次构建后，可以把代码目录挂载进容器，后续改代码基本不需要重建。
+
+### 本机/CPU 模式
+```bash
+cd stack
+docker compose -f docker-compose.yml -f docker-compose.live-code.yml up -d
+```
+
+### Linux + NVIDIA 模式
+```bash
+cd stack
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.live-code.yml up -d
+```
+
+说明:
+- `backend` 挂载 `../backend`，并以 `uvicorn --reload` 启动。
+- `frontend` 挂载 `../frontend` 到 nginx 静态目录。
+- 只有依赖变化（例如 `requirements*.txt` 变更）时，才需要重新 `--build`。
+
 ## OCR依赖说明
 - 默认本机构建不强制安装 OCR 依赖，避免 macOS 本地构建被 GPU/平台差异卡住。
 - 后端若无 OCR 依赖，上传仍可成功，OCR 状态会是 `failed`，后续在服务器上可重识别。
