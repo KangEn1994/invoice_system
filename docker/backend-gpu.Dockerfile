@@ -8,7 +8,9 @@ ARG PADDLE_GPU_PACKAGE=paddlepaddle-gpu==2.6.2
 ARG PADDLE_WHL_URL=https://www.paddlepaddle.org.cn/packages/stable/cu118/
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-pip python3-venv ca-certificates \
+    && apt-get install -y --no-install-recommends \
+      python3 python3-pip python3-venv ca-certificates \
+      libglib2.0-0 libsm6 libxext6 libxrender1 libgomp1 \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3 /usr/local/bin/python \
     && ln -sf /usr/bin/pip3 /usr/local/bin/pip
@@ -19,8 +21,10 @@ COPY backend/requirements.txt /tmp/requirements.txt
 COPY backend/requirements-ocr.txt /tmp/requirements-ocr.txt
 
 RUN pip install --no-cache-dir -r /tmp/requirements.txt \
+    && pip install --no-cache-dir -r /tmp/requirements-ocr.txt \
+    && pip uninstall -y paddlepaddle paddlepaddle-gpu || true \
     && pip install --no-cache-dir ${PADDLE_GPU_PACKAGE} -f ${PADDLE_WHL_URL} \
-    && pip install --no-cache-dir -r /tmp/requirements-ocr.txt
+    && python -c "import paddle; print('paddle ok:', paddle.__version__)"
 
 COPY backend /app
 

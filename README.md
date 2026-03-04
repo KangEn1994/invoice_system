@@ -46,6 +46,8 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 - GPU镜像里通过 `paddlepaddle-gpu` + `paddleocr` 启用OCR。
 - 如果你的 CUDA 版本不同，请调整 `stack/docker-compose.gpu.yml` 中的 `PADDLE_GPU_PACKAGE` 与 `PADDLE_WHL_URL`。
 - 也可以直接使用 `stack/start.sh`，它已内置 `docker-compose.yml + docker-compose.gpu.yml + docker-compose.live-code.yml`。
+- 若出现 `Can not import paddle core while this file exists`，请重建 `backend` 镜像一次（修复了 paddle CPU/GPU 包冲突）：
+  `./start.sh build --no-cache backend && ./start.sh up -d backend`
 
 ## 数据挂载目录
 - PostgreSQL 数据: `stack/data/postgres`
