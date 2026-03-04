@@ -20,7 +20,7 @@
 - 列表筛选（关键词、日期、金额、标签、OCR状态、排序）
 - 多选生成分享、按筛选全量生成分享
 - 公开分享页下载单文件与ZIP
-- 分享链接手动失效
+- 分享链接手动失效/删除
 - 分享访问日志查看
 
 ## 快速启动（本机/macOS 通用）
@@ -34,6 +34,13 @@ docker compose up -d --build
 默认管理员:
 - 用户名: `admin`
 - 密码: `admin123456`
+
+可通过 `stack/.env` 配置默认管理员（已提供模板 `stack/.env.example`）：
+```bash
+cd stack
+cp .env.example .env
+# 修改 BOOTSTRAP_ADMIN_PASSWORD 后再启动/重启
+```
 
 ## Linux + NVIDIA GPU 启动（服务器）
 ```bash
@@ -74,6 +81,10 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 - 查看日志: `./start.sh logs -f backend`
 - 重建后端: `./start.sh build --no-cache backend`
 
+注意:
+- `BOOTSTRAP_ADMIN_PASSWORD` 用于初始化默认管理员账号。
+- 若数据库里该管理员已经存在且密码已是新哈希格式，修改 `stack/.env` 后不会自动覆盖旧密码。
+
 ## CI/CD（GitHub Actions）
 仓库已内置两条工作流：
 - CI: `.github/workflows/ci.yml`
@@ -105,6 +116,13 @@ sh ./start.sh up -d
 ## OCR依赖说明
 - 默认本机构建不强制安装 OCR 依赖，避免 macOS 本地构建被 GPU/平台差异卡住。
 - 后端若无 OCR 依赖，上传仍可成功，OCR 状态会是 `failed`，后续在服务器上可重识别。
+
+## 分享访问日志保留策略
+- 默认只保留最近 7 天日志，超出部分自动清理。
+- 后端启动时会先执行一次清理，并每 24 小时自动执行一次。
+- 可通过环境变量调整：
+  - `SHARE_LOG_RETENTION_DAYS`（默认 `7`）
+  - `SHARE_LOG_CLEANUP_INTERVAL_HOURS`（默认 `24`）
 
 ## 常见故障排查
 - 后端报 `connection to server at "db" ... server closed the connection unexpectedly`：

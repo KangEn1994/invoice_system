@@ -6,7 +6,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse
 from sqlalchemy import Select, and_, func, select
 from sqlalchemy.orm import Session, selectinload
@@ -285,6 +285,30 @@ def revoke_share(
     db.refresh(share)
 
     return share
+
+
+@router.delete(
+    "/{share_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    response_model=None,
+)
+def delete_share(
+    share_id: int,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(get_current_admin),
+) -> Response:
+    share = db.get(Share, share_id)
+    if not share:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分享不存在")
+
+    cache_file = Path(settings.zip_cache_dir) / f"share_{share.id}.zip"
+    if cache_file.exists():
+        os.remove(cache_file)
+
+    db.delete(share)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @log_router.get("", response_model=ShareLogListResponse)

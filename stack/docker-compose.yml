@@ -26,8 +26,8 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://invoice:invoice@db:5432/invoice_system
       SECRET_KEY: change-this-in-production
-      BOOTSTRAP_ADMIN_USERNAME: admin
-      BOOTSTRAP_ADMIN_PASSWORD: admin123456
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-admin123456}
       FILES_DIR: /data/files
       ZIP_CACHE_DIR: /data/zip_cache
       PUBLIC_SHARE_BASE_URL: http://localhost:1033

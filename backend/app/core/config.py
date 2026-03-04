@@ -31,6 +31,8 @@ class Settings(BaseSettings):
 
     startup_db_max_retries: int = 60
     startup_db_retry_seconds: float = 2.0
+    share_log_retention_days: int = 7
+    share_log_cleanup_interval_hours: int = 24
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False)
 

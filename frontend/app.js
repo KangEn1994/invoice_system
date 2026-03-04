@@ -525,6 +525,12 @@ async function revokeShare(id) {
   await loadShares();
 }
 
+async function deleteShare(id) {
+  await apiFetch(`/api/shares/${id}`, { method: 'DELETE' });
+  await loadShares();
+  await loadShareLogs();
+}
+
 function renderShares(shares) {
   const tbody = document.getElementById('share-tbody');
   tbody.innerHTML = shares.map(item => {
@@ -538,6 +544,7 @@ function renderShares(shares) {
         <td><a href="${shareUrl}" target="_blank">打开分享页</a></td>
         <td>
           ${item.status === 'active' ? `<button data-revoke-id="${item.id}" class="small danger" type="button">失效</button>` : ''}
+          <button data-delete-share-id="${item.id}" class="small danger" type="button">删除</button>
         </td>
       </tr>
     `;
@@ -551,6 +558,18 @@ function renderShares(shares) {
         await revokeShare(id);
       } catch (e) {
         alert(`操作失败：${e.message}`);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-delete-share-id]').forEach(el => {
+    el.addEventListener('click', async () => {
+      const id = Number(el.getAttribute('data-delete-share-id'));
+      if (!confirm('确认删除该分享？删除后链接不可恢复。')) return;
+      try {
+        await deleteShare(id);
+      } catch (e) {
+        alert(`删除失败：${e.message}`);
       }
     });
   });
