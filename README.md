@@ -76,7 +76,14 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose
 说明:
 - `backend` 挂载 `../backend`，并以 `uvicorn --reload` 启动。
 - `frontend` 挂载 `../frontend` 到 nginx 静态目录。
-- 只有依赖变化（例如 `requirements*.txt` 变更）时，才需要重新 `--build`。
+- 只有系统层依赖变化（例如 Dockerfile 的 `apt` 包变化）时，才需要重新 `--build`。
+- Python 依赖变化时，优先执行 `./start.sh deps`，通常不需要重建镜像。
+
+## start.sh 常用命令
+- 启动: `./start.sh`（等价于 `up -d`）
+- 查看日志: `./start.sh logs -f backend`
+- 热更新 Python 依赖（不重建镜像）: `./start.sh deps`
+- 检查 OCR 关键依赖导入状态: `./start.sh check`
 
 ## OCR依赖说明
 - 默认本机构建不强制安装 OCR 依赖，避免 macOS 本地构建被 GPU/平台差异卡住。
