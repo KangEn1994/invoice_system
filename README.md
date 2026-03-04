@@ -45,15 +45,13 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 - `docker-compose.gpu.yml` 使用 `docker/backend-gpu.Dockerfile`。
 - GPU镜像里通过 `paddlepaddle-gpu` + `paddleocr` 启用OCR。
 - 如果你的 CUDA 版本不同，请调整 `stack/docker-compose.gpu.yml` 中的 `PADDLE_GPU_PACKAGE` 与 `PADDLE_WHL_URL`。
-- 也可以直接使用 `stack/start.sh`，它已内置 `docker-compose.yml + docker-compose.gpu.yml + docker-compose.live-code.yml`。
+- 也可以直接使用 `stack/start.sh`，它已内置 `docker-compose.yml + docker-compose.gpu.yml`，默认执行 `up -d --build`。
 - 若出现 `Can not import paddle core while this file exists`，请重建 `backend` 镜像一次（修复了 paddle CPU/GPU 包冲突）：
   `./start.sh build --no-cache backend && ./start.sh up -d backend`
 - 若出现 `ImportError: libGL.so.1: cannot open shared object file`，说明 OCR 依赖的 OpenCV 动态库缺失：
   `git pull` 后执行 `./start.sh build --no-cache backend && ./start.sh up -d backend`
 - 若出现 `ImportError: numpy.core.multiarray failed to import`，说明 `numpy/opencv` 二进制 ABI 不匹配：
   `git pull` 后执行 `./start.sh build --no-cache backend && ./start.sh up -d backend`
-- 若 `./start.sh deps` 报 `ResolutionImpossible` 且提示 `paddleocr ... depends on opencv-python<=4.6.0.66`，
-  说明本地约束和 PaddleOCR 依赖冲突，先 `git pull` 同步版本后重试 `./start.sh deps`。
 - 若出现 `Cannot load cudnn shared library`：
   1. 临时恢复（不重建）：把 `stack/docker-compose.gpu.yml` 中 `OCR_USE_GPU` 改为 `"false"`，重启 backend；
   2. 根治：`git pull` 后执行 `./start.sh build --no-cache backend && ./start.sh up -d backend`（已切到 CUDA 11.8 + cuDNN8 基线）。
@@ -63,32 +61,10 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 - 发票文件: `stack/data/files`
 - 分享 ZIP 缓存: `stack/data/zip_cache`
 
-## 开发模式（减少重建镜像）
-首次构建后，可以把代码目录挂载进容器，后续改代码基本不需要重建。
-
-### 本机/CPU 模式
-```bash
-cd stack
-docker compose -f docker-compose.yml -f docker-compose.live-code.yml up -d
-```
-
-### Linux + NVIDIA 模式
-```bash
-cd stack
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.live-code.yml up -d
-```
-
-说明:
-- `backend` 挂载 `../backend`，并以 `uvicorn --reload` 启动。
-- `frontend` 挂载 `../frontend` 到 nginx 静态目录。
-- 只有系统层依赖变化（例如 Dockerfile 的 `apt` 包变化）时，才需要重新 `--build`。
-- Python 依赖变化时，优先执行 `./start.sh deps`，通常不需要重建镜像。
-
 ## start.sh 常用命令
-- 启动: `./start.sh`（等价于 `up -d`）
+- 启动: `./start.sh`（等价于 `up -d --build`）
 - 查看日志: `./start.sh logs -f backend`
-- 热更新 Python 依赖（不重建镜像）: `./start.sh deps`
-- 检查 OCR 关键依赖导入状态: `./start.sh check`
+- 重建后端: `./start.sh build --no-cache backend`
 
 ## OCR依赖说明
 - 默认本机构建不强制安装 OCR 依赖，避免 macOS 本地构建被 GPU/平台差异卡住。
