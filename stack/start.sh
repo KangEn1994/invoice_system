@@ -8,4 +8,4 @@ if [ $# -eq 0 ]; then
   set -- up -d --build
 fi
 
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml "$@"
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.live-code.yml "$@"

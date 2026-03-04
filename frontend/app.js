@@ -1,10 +1,12 @@
 const ACCESS_KEY = 'invoice_access_token';
 const REFRESH_KEY = 'invoice_refresh_token';
+const SYSTEM_BASE_URL_KEY = 'invoice_system_base_url';
 
 const state = {
   tags: [],
   invoices: [],
   selected: new Set(),
+  editingInvoiceId: null,
 };
 
 function getAccessToken() {
@@ -37,6 +39,28 @@ function escapeHtml(str) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;');
+}
+
+function normalizeBaseUrlInput(raw) {
+  const text = (raw || '').trim();
+  if (!text) return location.origin;
+  return text.replace(/\/+$/, '');
+}
+
+function getSystemBaseUrl() {
+  return normalizeBaseUrlInput(localStorage.getItem(SYSTEM_BASE_URL_KEY) || location.origin);
+}
+
+function saveSystemBaseUrl(value) {
+  const normalized = normalizeBaseUrlInput(value);
+  localStorage.setItem(SYSTEM_BASE_URL_KEY, normalized);
+  const input = document.getElementById('system-base-url');
+  if (input) input.value = normalized;
+  return normalized;
+}
+
+function buildShareUrlByToken(token) {
+  return `${getSystemBaseUrl()}/share.html?token=${encodeURIComponent(token)}`;
 }
 
 function setLoggedIn(loggedIn) {
@@ -267,39 +291,59 @@ async function deleteInvoice(id) {
   await loadInvoices();
 }
 
-async function editInvoice(inv) {
-  const payload = {};
+function normalizeAmountInput(raw) {
+  const text = (raw || '').trim();
+  if (!text) return null;
+  const cleaned = text.replaceAll('¥', '').replaceAll('￥', '').replaceAll(',', '').replaceAll('元', '').trim();
+  if (!/^\d+(?:\.\d{1,2})?$/.test(cleaned)) {
+    throw new Error('金额格式错误，应为数字或两位小数');
+  }
+  return cleaned;
+}
 
-  const companyName = prompt('公司名', inv.company_name || '');
-  if (companyName === null) return;
-  payload.company_name = companyName.trim() || null;
+function openEditForm(inv) {
+  state.editingInvoiceId = inv.id;
+  document.getElementById('edit-id').value = String(inv.id);
+  document.getElementById('edit-company-name').value = inv.company_name || '';
+  document.getElementById('edit-tax-id').value = inv.tax_id || '';
+  document.getElementById('edit-invoice-number').value = inv.invoice_number || '';
+  document.getElementById('edit-issue-date').value = inv.issue_date || '';
+  document.getElementById('edit-item-name').value = inv.item_name || '';
+  document.getElementById('edit-total-amount').value = inv.total_amount || '';
+  setText('edit-msg', '');
+  document.getElementById('edit-panel').classList.remove('hidden');
+}
 
-  const taxId = prompt('纳税识别号', inv.tax_id || '');
-  if (taxId === null) return;
-  payload.tax_id = taxId.trim() || null;
+function closeEditForm() {
+  state.editingInvoiceId = null;
+  document.getElementById('edit-form').reset();
+  document.getElementById('edit-panel').classList.add('hidden');
+  setText('edit-msg', '');
+}
 
-  const invoiceNumber = prompt('发票号码', inv.invoice_number || '');
-  if (invoiceNumber === null) return;
-  payload.invoice_number = invoiceNumber.trim() || null;
+function collectEditPayload() {
+  const issueDateRaw = document.getElementById('edit-issue-date').value.trim();
+  const amountRaw = document.getElementById('edit-total-amount').value;
+  return {
+    company_name: document.getElementById('edit-company-name').value.trim() || null,
+    tax_id: document.getElementById('edit-tax-id').value.trim().toUpperCase() || null,
+    invoice_number: document.getElementById('edit-invoice-number').value.trim() || null,
+    issue_date: issueDateRaw || null,
+    item_name: document.getElementById('edit-item-name').value.trim() || null,
+    total_amount: normalizeAmountInput(amountRaw),
+  };
+}
 
-  const issueDate = prompt('开票日期(YYYY-MM-DD)', inv.issue_date || '');
-  if (issueDate === null) return;
-  payload.issue_date = issueDate.trim() || null;
-
-  const itemName = prompt('项目名称', inv.item_name || '');
-  if (itemName === null) return;
-  payload.item_name = itemName.trim() || null;
-
-  const amount = prompt('总金额', inv.total_amount || '');
-  if (amount === null) return;
-  payload.total_amount = amount.trim() || null;
-
-  await apiFetch(`/api/invoices/${inv.id}`, {
+async function submitEditForm(evt) {
+  evt.preventDefault();
+  if (!state.editingInvoiceId) return;
+  const payload = collectEditPayload();
+  await apiFetch(`/api/invoices/${state.editingInvoiceId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-
+  closeEditForm();
   await loadInvoices();
 }
 
@@ -334,6 +378,7 @@ function renderInvoices() {
         <td><input type="checkbox" data-invoice-id="${inv.id}" ${checked} /></td>
         <td>${inv.id}</td>
         <td>${escapeHtml(inv.company_name || '')}</td>
+        <td>${escapeHtml(inv.tax_id || '')}</td>
         <td>${escapeHtml(inv.invoice_number || '')}</td>
         <td>${escapeHtml(inv.issue_date || '')}</td>
         <td>${escapeHtml(inv.item_name || '')}</td>
@@ -393,15 +438,11 @@ function renderInvoices() {
   });
 
   document.querySelectorAll('[data-edit-id]').forEach(el => {
-    el.addEventListener('click', async () => {
+    el.addEventListener('click', () => {
       const id = Number(el.getAttribute('data-edit-id'));
       const inv = state.invoices.find(x => x.id === id);
       if (!inv) return;
-      try {
-        await editInvoice(inv);
-      } catch (e) {
-        alert(`编辑失败：${e.message}`);
-      }
+      openEditForm(inv);
     });
   });
 
@@ -460,7 +501,7 @@ async function createShareFromSelected() {
   });
 
   const data = await resp.json();
-  alert(`分享已创建：${data.share_url}`);
+  alert(`分享已创建：${buildShareUrlByToken(data.token)}`);
   await loadShares();
 }
 
@@ -475,7 +516,7 @@ async function createShareFromFilters() {
   });
 
   const data = await resp.json();
-  alert(`筛选分享已创建：${data.share_url}`);
+  alert(`筛选分享已创建：${buildShareUrlByToken(data.token)}`);
   await loadShares();
 }
 
@@ -487,7 +528,7 @@ async function revokeShare(id) {
 function renderShares(shares) {
   const tbody = document.getElementById('share-tbody');
   tbody.innerHTML = shares.map(item => {
-    const shareUrl = `${location.origin}/share.html?token=${encodeURIComponent(item.token)}`;
+    const shareUrl = buildShareUrlByToken(item.token);
     return `
       <tr>
         <td>${item.id}</td>
@@ -595,6 +636,18 @@ async function batchSetTags() {
 }
 
 async function initEvents() {
+  const systemBaseUrlInput = document.getElementById('system-base-url');
+  if (systemBaseUrlInput) {
+    systemBaseUrlInput.value = getSystemBaseUrl();
+    systemBaseUrlInput.addEventListener('change', () => {
+      saveSystemBaseUrl(systemBaseUrlInput.value);
+      loadShares().catch(() => {});
+    });
+    systemBaseUrlInput.addEventListener('blur', () => {
+      saveSystemBaseUrl(systemBaseUrlInput.value);
+    });
+  }
+
   document.getElementById('login-form').addEventListener('submit', async evt => {
     evt.preventDefault();
     const username = document.getElementById('username').value.trim();
@@ -610,6 +663,14 @@ async function initEvents() {
 
   document.getElementById('logout-btn').addEventListener('click', logout);
   document.getElementById('upload-form').addEventListener('submit', handleUpload);
+  document.getElementById('edit-form').addEventListener('submit', async evt => {
+    try {
+      await submitEditForm(evt);
+    } catch (e) {
+      setText('edit-msg', `保存失败：${e.message}`);
+    }
+  });
+  document.getElementById('edit-cancel-btn').addEventListener('click', closeEditForm);
 
   document.getElementById('tag-form').addEventListener('submit', async evt => {
     evt.preventDefault();

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -164,7 +165,7 @@ class InvoiceOCRService:
         return "\n".join(lines)
 
     def _extract_fields(self, text: str) -> dict[str, Any]:
-        normalized = text.replace("：", ":")
+        normalized = self._normalize_text(text)
 
         company_name = self._find_first(
             normalized,
@@ -176,14 +177,7 @@ class InvoiceOCRService:
         if company_name:
             company_name = company_name.strip(" _-:")
 
-        tax_id = self._find_first(
-            normalized,
-            [
-                r"纳税人识别号\s*:?\s*([0-9A-Z]{15,20})",
-                r"税号\s*:?\s*([0-9A-Z]{15,20})",
-                r"\b([0-9A-Z]{18})\b",
-            ],
-        )
+        tax_id = self._extract_tax_id(normalized)
 
         invoice_number = self._find_first(
             normalized,
@@ -213,6 +207,43 @@ class InvoiceOCRService:
                 return match.group(1).strip()
         return None
 
+    def _normalize_text(self, text: str) -> str:
+        normalized = unicodedata.normalize("NFKC", text or "")
+        normalized = normalized.replace("：", ":").replace("（", "(").replace("）", ")")
+        return normalized
+
+    def _clean_tax_id_candidate(self, raw: str) -> str:
+        return re.sub(r"[^0-9A-Z]", "", (raw or "").upper())
+
+    def _is_tax_id_like(self, value: str) -> bool:
+        return 15 <= len(value) <= 20 and value.isalnum()
+
+    def _extract_tax_id(self, text: str) -> str | None:
+        keyword_regex = re.compile(r"(纳税人识别号|纳税识别号|税号|统一社会信用代码)", flags=re.IGNORECASE)
+        candidate_regex = re.compile(r"([0-9A-Z][0-9A-Z\-\s]{14,30}[0-9A-Z])", flags=re.IGNORECASE)
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+        for idx, line in enumerate(lines):
+            if not keyword_regex.search(line):
+                continue
+            window = " ".join(lines[idx : idx + 3])
+            for match in candidate_regex.finditer(window):
+                cleaned = self._clean_tax_id_candidate(match.group(1))
+                if self._is_tax_id_like(cleaned):
+                    return cleaned
+
+        for pattern in [
+            r"(?:纳税人识别号|纳税识别号|税号|统一社会信用代码)\s*[:：]?\s*([0-9A-Z\-\s]{15,30})",
+            r"\b([0-9A-Z]{18})\b",
+            r"\b([0-9A-Z]{15})\b",
+        ]:
+            for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+                cleaned = self._clean_tax_id_candidate(match.group(1))
+                if self._is_tax_id_like(cleaned):
+                    return cleaned
+
+        return None
+
     def _extract_issue_date(self, text: str) -> str | None:
         patterns = [
             r"开票日期\s*:?\s*(\d{4}[年\-/]\d{1,2}[月\-/]\d{1,2}日?)",
@@ -240,33 +271,62 @@ class InvoiceOCRService:
                 return candidate[:255]
         return None
 
-    def _extract_amount(self, text: str) -> str | None:
-        candidates: list[str] = []
+    def _parse_amount(self, raw: str) -> Decimal | None:
+        cleaned = (raw or "").replace("¥", "").replace("￥", "").replace(",", "").replace(" ", "").strip()
+        if not cleaned:
+            return None
+        try:
+            value = Decimal(cleaned)
+        except InvalidOperation:
+            return None
+        if value < 0:
+            return None
+        return value
 
-        for pattern in [
-            r"价税合计\s*\(.*?\)\s*:?\s*([¥￥]?\s*[0-9,]+(?:\.[0-9]{1,2})?)",
-            r"合计\s*:?\s*([¥￥]?\s*[0-9,]+(?:\.[0-9]{1,2})?)",
-            r"总金额\s*:?\s*([¥￥]?\s*[0-9,]+(?:\.[0-9]{1,2})?)",
+    def _extract_amount(self, text: str) -> str | None:
+        money_pattern = re.compile(r"([¥￥]?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?)")
+        candidates: list[tuple[int, Decimal]] = []
+
+        for pattern, score in [
+            (r"价税合计\s*(?:\([^)]*小写[^)]*\))?\s*[:：]?\s*([¥￥]?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?)", 120),
+            (r"\(小写\)\s*[:：]?\s*([¥￥]?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?)", 110),
+            (r"总金额\s*[:：]?\s*([¥￥]?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?)", 100),
+            (r"金额合计\s*[:：]?\s*([¥￥]?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?)", 95),
+            (r"合计\s*[:：]?\s*([¥￥]?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?)", 80),
+            (r"总计\s*[:：]?\s*([¥￥]?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?)", 80),
         ]:
             for match in re.finditer(pattern, text, flags=re.IGNORECASE):
-                candidates.append(match.group(1))
+                parsed = self._parse_amount(match.group(1))
+                if parsed is not None:
+                    candidates.append((score, parsed))
+
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+
+            line_score = 0
+            if any(k in stripped for k in ["价税合计", "小写"]):
+                line_score = 90
+            elif any(k in stripped for k in ["总金额", "金额合计", "合计", "总计"]):
+                line_score = 70
+            elif "¥" in stripped or "￥" in stripped:
+                line_score = 45
+
+            if line_score <= 0:
+                continue
+
+            for match in money_pattern.finditer(stripped):
+                parsed = self._parse_amount(match.group(1))
+                if parsed is not None:
+                    candidates.append((line_score, parsed))
 
         if not candidates:
             return None
 
-        # Prefer the largest parsed value, which usually matches tax-included total.
-        parsed_values: list[Decimal] = []
-        for item in candidates:
-            cleaned = item.replace("¥", "").replace("￥", "").replace(",", "").strip()
-            try:
-                parsed_values.append(Decimal(cleaned))
-            except InvalidOperation:
-                continue
-
-        if not parsed_values:
-            return None
-
-        return str(max(parsed_values).quantize(Decimal("0.01")))
+        best_score = max(score for score, _ in candidates)
+        best_values = [value for score, value in candidates if score == best_score]
+        return str(max(best_values).quantize(Decimal("0.01")))
 
 
 ocr_service = InvoiceOCRService()

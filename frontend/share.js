@@ -16,6 +16,24 @@ function setMsg(text) {
   document.getElementById('share-msg').textContent = text;
 }
 
+function amountTextToCents(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return 0;
+
+  const cleaned = text.replaceAll('¥', '').replaceAll('￥', '').replaceAll(',', '').trim();
+  const match = cleaned.match(/^(\d+)(?:\.(\d{1,2}))?$/);
+  if (!match) return 0;
+
+  const intPart = Number(match[1]) || 0;
+  const fracRaw = (match[2] || '').padEnd(2, '0').slice(0, 2);
+  const fracPart = Number(fracRaw) || 0;
+  return intPart * 100 + fracPart;
+}
+
+function formatCents(cents) {
+  return (cents / 100).toFixed(2);
+}
+
 async function loadShare(token) {
   const resp = await fetch(`/s/${encodeURIComponent(token)}`);
   if (!resp.ok) {
@@ -31,6 +49,8 @@ async function loadShare(token) {
 
 function renderShare(token, data) {
   document.getElementById('share-title').textContent = data.title || '发票分享';
+  const totalCents = (data.items || []).reduce((sum, item) => sum + amountTextToCents(item.total_amount), 0);
+  document.getElementById('share-total-amount').textContent = `合计金额：${formatCents(totalCents)}`;
 
   const tbody = document.getElementById('share-items-tbody');
   tbody.innerHTML = (data.items || []).map(item => `
@@ -49,7 +69,7 @@ function renderShare(token, data) {
     window.location.href = `/s/${encodeURIComponent(token)}/zip`;
   };
 
-  setMsg(`共 ${data.items.length} 条发票`);
+  setMsg(`共 ${data.items.length} 条发票，合计 ${formatCents(totalCents)}`);
 }
 
 async function init() {

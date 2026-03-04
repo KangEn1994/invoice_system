@@ -66,6 +66,45 @@
 
       <div class="card">
         <h2>发票列表</h2>
+        <div id="edit-panel" class="edit-panel hidden">
+          <h3>编辑发票</h3>
+          <form id="edit-form" class="grid-3">
+            <label>
+              发票ID
+              <input id="edit-id" type="text" readonly />
+            </label>
+            <label>
+              公司名
+              <input id="edit-company-name" type="text" maxlength="255" />
+            </label>
+            <label>
+              纳税识别号
+              <input id="edit-tax-id" type="text" maxlength="64" />
+            </label>
+            <label>
+              发票号码
+              <input id="edit-invoice-number" type="text" maxlength="64" />
+            </label>
+            <label>
+              开票日期
+              <input id="edit-issue-date" type="date" />
+            </label>
+            <label>
+              项目名称
+              <input id="edit-item-name" type="text" maxlength="255" />
+            </label>
+            <label>
+              总金额
+              <input id="edit-total-amount" type="text" placeholder="如 1234.56" />
+            </label>
+            <div class="inline-form align-end">
+              <button id="edit-save-btn" type="submit">保存</button>
+              <button id="edit-cancel-btn" type="button" class="danger">取消</button>
+            </div>
+          </form>
+          <p id="edit-msg" class="hint"></p>
+        </div>
+
         <form id="filter-form" class="grid-3">
           <input id="filter-q" type="text" placeholder="公司/票号/税号关键词" />
           <input id="filter-company" type="text" placeholder="公司名" />
@@ -133,6 +172,7 @@
         </div>
 
         <div class="inline-form top-gap">
+          <input id="system-base-url" type="text" placeholder="系统地址，如 http://your-host:8080" />
           <input id="share-title" type="text" placeholder="分享标题" />
           <button id="create-share-btn" type="button">按已选择生成分享</button>
           <button id="create-share-from-filter-btn" type="button">按当前筛选全部生成分享</button>
@@ -145,6 +185,7 @@
                 <th>选择</th>
                 <th>ID</th>
                 <th>公司名</th>
+                <th>税号</th>
                 <th>发票号码</th>
                 <th>开票日期</th>
                 <th>项目</th>
