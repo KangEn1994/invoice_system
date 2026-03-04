@@ -215,11 +215,17 @@ class InvoiceOCRService:
     def _clean_tax_id_candidate(self, raw: str) -> str:
         return re.sub(r"[^0-9A-Z]", "", (raw or "").upper())
 
+    def _normalize_tax_id_candidate(self, raw: str) -> str:
+        cleaned = self._clean_tax_id_candidate(raw)
+        # OCR often confuses O/I/L with 0/1 on taxpayer id strings.
+        return cleaned.translate(str.maketrans({"O": "0", "I": "1", "L": "1"}))
+
     def _is_tax_id_like(self, value: str) -> bool:
         return 15 <= len(value) <= 20 and value.isalnum()
 
     def _extract_tax_id(self, text: str) -> str | None:
-        keyword_regex = re.compile(r"(纳税人识别号|纳税识别号|税号|统一社会信用代码)", flags=re.IGNORECASE)
+        keyword_text = r"(?:统一社会信用代码(?:\s*/\s*纳税人识别号)?|社会信用代码(?:\s*/\s*纳税人识别号)?|纳税人识别号|纳税识别号|税号)"
+        keyword_regex = re.compile(keyword_text, flags=re.IGNORECASE)
         candidate_regex = re.compile(r"([0-9A-Z][0-9A-Z\-\s]{14,30}[0-9A-Z])", flags=re.IGNORECASE)
         lines = [line.strip() for line in text.splitlines() if line.strip()]
 
@@ -228,17 +234,17 @@ class InvoiceOCRService:
                 continue
             window = " ".join(lines[idx : idx + 3])
             for match in candidate_regex.finditer(window):
-                cleaned = self._clean_tax_id_candidate(match.group(1))
+                cleaned = self._normalize_tax_id_candidate(match.group(1))
                 if self._is_tax_id_like(cleaned):
                     return cleaned
 
         for pattern in [
-            r"(?:纳税人识别号|纳税识别号|税号|统一社会信用代码)\s*[:：]?\s*([0-9A-Z\-\s]{15,30})",
+            rf"{keyword_text}\s*[:：]?\s*([0-9A-Z\-\s]{{15,30}})",
             r"\b([0-9A-Z]{18})\b",
             r"\b([0-9A-Z]{15})\b",
         ]:
             for match in re.finditer(pattern, text, flags=re.IGNORECASE):
-                cleaned = self._clean_tax_id_candidate(match.group(1))
+                cleaned = self._normalize_tax_id_candidate(match.group(1))
                 if self._is_tax_id_like(cleaned):
                     return cleaned
 

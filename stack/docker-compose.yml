@@ -30,8 +30,8 @@ services:
       BOOTSTRAP_ADMIN_PASSWORD: admin123456
       FILES_DIR: /data/files
       ZIP_CACHE_DIR: /data/zip_cache
-      PUBLIC_SHARE_BASE_URL: http://localhost:8080
-      CORS_ORIGINS: http://localhost:8080
+      PUBLIC_SHARE_BASE_URL: http://localhost:1033
+      CORS_ORIGINS: http://localhost:1033
       OCR_USE_GPU: "false"
     volumes:
       - ./data/files:/data/files
@@ -51,4 +51,4 @@ services:
     depends_on:
       - backend
     ports:
-      - "8080:80"
+      - "1033:80"

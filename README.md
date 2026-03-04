@@ -29,7 +29,7 @@ cd stack
 docker compose up -d --build
 ```
 
-访问: [http://localhost:8080](http://localhost:8080)
+访问: [http://localhost:1033](http://localhost:1033)
 
 默认管理员:
 - 用户名: `admin`
@@ -73,6 +73,34 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 - 启动: `./start.sh`（等价于 `up -d --build`）
 - 查看日志: `./start.sh logs -f backend`
 - 重建后端: `./start.sh build --no-cache backend`
+
+## CI/CD（GitHub Actions）
+仓库已内置两条工作流：
+- CI: `.github/workflows/ci.yml`
+  - 后端依赖安装 + Python 编译检查 + FastAPI 导入烟雾测试
+  - 前端 JS 语法解析检查
+  - Compose 配置解析与 Docker 镜像构建检查
+- CD: `.github/workflows/cd.yml`
+  - 当 `main` 分支 push 且 CI 成功后，自动 SSH 到服务器部署
+  - 也支持在 Actions 页面手动触发 `workflow_dispatch`
+
+需要在 GitHub 仓库配置以下 Secrets：
+- `DEPLOY_HOST`: 服务器地址
+- `DEPLOY_USER`: SSH 用户
+- `DEPLOY_SSH_KEY`: 私钥内容（建议专用 deploy key）
+- `DEPLOY_PORT`: SSH 端口（可选，不填默认 22）
+
+可选仓库变量（Variables）：
+- `DEPLOY_PATH`: 服务器项目路径（默认 `/home/jingjian/apps/invoice_system`）
+
+CD 执行的核心命令：
+```bash
+cd <DEPLOY_PATH>
+git pull
+cd stack
+docker compose down
+sh ./start.sh up -d
+```
 
 ## OCR依赖说明
 - 默认本机构建不强制安装 OCR 依赖，避免 macOS 本地构建被 GPU/平台差异卡住。

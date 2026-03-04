@@ -3,13 +3,13 @@ function getTokenFromQuery() {
   return url.searchParams.get('token') || '';
 }
 
-function escapeHtml(str) {
-  return (str || '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 function setMsg(text) {
@@ -20,7 +20,7 @@ function amountTextToCents(value) {
   const text = String(value ?? '').trim();
   if (!text) return 0;
 
-  const cleaned = text.replaceAll('¥', '').replaceAll('￥', '').replaceAll(',', '').trim();
+  const cleaned = text.replace(/[¥￥,]/g, '').trim();
   const match = cleaned.match(/^(\d+)(?:\.(\d{1,2}))?$/);
   if (!match) return 0;
 

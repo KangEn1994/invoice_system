@@ -32,13 +32,13 @@ function setText(id, text) {
   if (el) el.textContent = text;
 }
 
-function escapeHtml(str) {
-  return (str || '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 function normalizeBaseUrlInput(raw) {
@@ -294,7 +294,7 @@ async function deleteInvoice(id) {
 function normalizeAmountInput(raw) {
   const text = (raw || '').trim();
   if (!text) return null;
-  const cleaned = text.replaceAll('¥', '').replaceAll('￥', '').replaceAll(',', '').replaceAll('元', '').trim();
+  const cleaned = text.replace(/[¥￥,元]/g, '').trim();
   if (!/^\d+(?:\.\d{1,2})?$/.test(cleaned)) {
     throw new Error('金额格式错误，应为数字或两位小数');
   }
