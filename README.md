@@ -50,6 +50,8 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
   `./start.sh build --no-cache backend && ./start.sh up -d backend`
 - 若出现 `ImportError: libGL.so.1: cannot open shared object file`，说明 OCR 依赖的 OpenCV 动态库缺失：
   `git pull` 后执行 `./start.sh build --no-cache backend && ./start.sh up -d backend`
+- 若出现 `ImportError: numpy.core.multiarray failed to import`，说明 `numpy/opencv` 二进制 ABI 不匹配：
+  `git pull` 后执行 `./start.sh build --no-cache backend && ./start.sh up -d backend`
 
 ## 数据挂载目录
 - PostgreSQL 数据: `stack/data/postgres`

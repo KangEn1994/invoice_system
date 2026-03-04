@@ -208,12 +208,16 @@ function renderTagOptions() {
   const uploadSelect = document.getElementById('upload-tag-ids');
   const filterSelect = document.getElementById('filter-tag-id');
   const batchSelect = document.getElementById('batch-tag-ids');
+  const batchSetBtn = document.getElementById('batch-set-tags-btn');
 
   const optionsHtml = state.tags.map(tag => `<option value="${tag.id}">${escapeHtml(tag.name)} (#${tag.id})</option>`).join('');
 
-  uploadSelect.innerHTML = optionsHtml;
-  batchSelect.innerHTML = optionsHtml;
+  uploadSelect.innerHTML = optionsHtml || '<option value="" disabled>暂无标签</option>';
+  batchSelect.innerHTML = optionsHtml || '<option value="" disabled>暂无标签，先新增标签</option>';
   filterSelect.innerHTML = '<option value="">全部标签</option>' + optionsHtml;
+  if (batchSetBtn) {
+    batchSetBtn.disabled = state.tags.length === 0;
+  }
 
   const tagList = document.getElementById('tag-list');
   tagList.innerHTML = state.tags.map(tag => `
@@ -578,7 +582,9 @@ async function batchSetTags() {
     return;
   }
 
-  const tagIds = Array.from(document.getElementById('batch-tag-ids').selectedOptions).map(opt => Number(opt.value));
+  const tagIds = Array.from(document.getElementById('batch-tag-ids').selectedOptions)
+    .map(opt => Number(opt.value))
+    .filter(id => Number.isInteger(id) && id > 0);
   await apiFetch('/api/invoices/batch/tags', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

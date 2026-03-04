@@ -24,7 +24,8 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt \
     && pip install --no-cache-dir -r /tmp/requirements-ocr.txt \
     && pip uninstall -y paddlepaddle paddlepaddle-gpu || true \
     && pip install --no-cache-dir ${PADDLE_GPU_PACKAGE} -f ${PADDLE_WHL_URL} \
-    && python -c "import paddle; print('paddle ok:', paddle.__version__)"
+    && pip install --no-cache-dir --force-reinstall numpy==1.26.4 opencv-python==4.8.1.78 \
+    && python -c "import numpy, cv2, paddle; print('numpy', numpy.__version__, 'cv2', cv2.__version__, 'paddle', paddle.__version__)"
 
 COPY backend /app
 
