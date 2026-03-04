@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -7,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class InvoiceOCRService:
@@ -24,15 +27,24 @@ class InvoiceOCRService:
             from paddleocr import PaddleOCR  # type: ignore
 
             self._ocr_engine = PaddleOCR(use_angle_cls=True, lang=settings.ocr_lang, use_gpu=settings.ocr_use_gpu)
+            logger.info("PaddleOCR initialized. use_gpu=%s lang=%s", settings.ocr_use_gpu, settings.ocr_lang)
             return self._ocr_engine
         except Exception as exc:  # pragma: no cover - runtime environment dependent
             self._init_error = f"PaddleOCR init failed: {exc}"
+            logger.exception("PaddleOCR init failed. use_gpu=%s lang=%s", settings.ocr_use_gpu, settings.ocr_lang)
             raise RuntimeError(self._init_error) from exc
 
     def run(self, file_path: str) -> dict[str, Any]:
         path = Path(file_path)
         if not path.exists():
-            return {"status": "failed", "error": "file not found", "fields": {}, "raw_text": ""}
+            logger.warning("OCR skipped: file not found: %s", file_path)
+            return {
+                "status": "failed",
+                "error": "file not found",
+                "fields": {},
+                "raw_text": "",
+                "raw": {"error": "file not found"},
+            }
 
         try:
             ocr = self._get_engine()
@@ -48,7 +60,38 @@ class InvoiceOCRService:
                 "raw": {"text": text},
             }
         except Exception as exc:  # pragma: no cover - runtime environment dependent
-            return {"status": "failed", "error": str(exc), "fields": {}, "raw_text": "", "raw": {"error": str(exc)}}
+            logger.exception("OCR execution failed for file=%s", file_path)
+            return {
+                "status": "failed",
+                "error": str(exc),
+                "fields": {},
+                "raw_text": "",
+                "raw": {
+                    "error": str(exc),
+                    "engine_init_error": self._init_error,
+                    "use_gpu": settings.ocr_use_gpu,
+                    "lang": settings.ocr_lang,
+                },
+            }
+
+    def health(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "use_gpu": settings.ocr_use_gpu,
+            "lang": settings.ocr_lang,
+            "engine_initialized": self._ocr_engine is not None,
+            "init_error": self._init_error,
+        }
+        try:
+            self._get_engine()
+            data["ok"] = True
+            data["engine_initialized"] = True
+            data["init_error"] = self._init_error
+        except Exception as exc:  # pragma: no cover - runtime environment dependent
+            data["ok"] = False
+            data["error"] = str(exc)
+            data["engine_initialized"] = self._ocr_engine is not None
+            data["init_error"] = self._init_error
+        return data
 
     def _flatten_result_text(self, result: Any) -> str:
         if not result:

@@ -260,6 +260,13 @@ def batch_set_invoice_tags(
     return {"updated_count": len(invoices)}
 
 
+@router.get("/ocr/health", response_model=dict)
+def get_ocr_health(
+    _: AdminUser = Depends(get_current_admin),
+) -> dict:
+    return ocr_service.health()
+
+
 @router.get("/{invoice_id}", response_model=InvoiceOut)
 def get_invoice(
     invoice_id: int,

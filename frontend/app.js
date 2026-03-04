@@ -186,6 +186,12 @@ function invoiceTagsToText(tags) {
   return (tags || []).map(t => t.name).join(', ');
 }
 
+function getOcrError(inv) {
+  const raw = inv && inv.ocr_raw ? inv.ocr_raw : null;
+  if (!raw) return '';
+  return raw.error || raw.engine_init_error || '';
+}
+
 function parseIdListInput(raw) {
   const text = (raw || '').trim();
   if (!text) return [];
@@ -315,6 +321,10 @@ function renderInvoices() {
   const tbody = document.getElementById('invoice-tbody');
   tbody.innerHTML = state.invoices.map(inv => {
     const checked = state.selected.has(inv.id) ? 'checked' : '';
+    const ocrError = getOcrError(inv);
+    const ocrCell = inv.ocr_status === 'failed'
+      ? `${escapeHtml(inv.ocr_status || '')}${ocrError ? ` <button class="small danger" data-ocr-error-id="${inv.id}" type="button">原因</button>` : ''}`
+      : escapeHtml(inv.ocr_status || '');
     return `
       <tr>
         <td><input type="checkbox" data-invoice-id="${inv.id}" ${checked} /></td>
@@ -325,7 +335,7 @@ function renderInvoices() {
         <td>${escapeHtml(inv.item_name || '')}</td>
         <td>${escapeHtml(inv.total_amount || '')}</td>
         <td>${escapeHtml(invoiceTagsToText(inv.tags))}</td>
-        <td>${escapeHtml(inv.ocr_status || '')}</td>
+        <td>${ocrCell}</td>
         <td>
           <button class="small" data-download-id="${inv.id}" type="button">下载</button>
           <button class="small" data-ocr-id="${inv.id}" type="button">重识别</button>
@@ -366,6 +376,15 @@ function renderInvoices() {
       } catch (e) {
         alert(`重识别失败：${e.message}`);
       }
+    });
+  });
+
+  document.querySelectorAll('[data-ocr-error-id]').forEach(el => {
+    el.addEventListener('click', () => {
+      const id = Number(el.getAttribute('data-ocr-error-id'));
+      const inv = state.invoices.find(x => x.id === id);
+      const reason = getOcrError(inv);
+      alert(reason || '未记录具体错误，请查看后端日志');
     });
   });
 

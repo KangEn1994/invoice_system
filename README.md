@@ -87,3 +87,6 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose
   1. `./start.sh down`
   2. 清空 `stack/data/postgres/*`
   3. `./start.sh up -d`
+- OCR 识别失败但日志看不到明确原因：
+  1. 先查 OCR 健康接口：`curl -sS http://127.0.0.1:8000/api/invoices/ocr/health -H \"Authorization: Bearer <token>\"`
+  2. 前端发票列表里 `OCR=failed` 行可点击 `原因` 按钮查看后端返回的错误文本。
