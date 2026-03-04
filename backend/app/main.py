@@ -30,14 +30,20 @@ def on_startup() -> None:
     db = SessionLocal()
     try:
         admin = db.scalar(select(AdminUser).where(AdminUser.username == settings.bootstrap_admin_username))
+        bootstrap_hash = get_password_hash(settings.bootstrap_admin_password)
         if not admin:
             db.add(
                 AdminUser(
                     username=settings.bootstrap_admin_username,
-                    password_hash=get_password_hash(settings.bootstrap_admin_password),
+                    password_hash=bootstrap_hash,
                     is_active=True,
                 )
             )
+            db.commit()
+        elif not admin.password_hash.startswith("$pbkdf2-sha256$"):
+            # Migrate legacy password hashes to pbkdf2_sha256 to avoid bcrypt backend compatibility issues.
+            admin.password_hash = bootstrap_hash
+            db.add(admin)
             db.commit()
     finally:
         db.close()
