@@ -77,3 +77,13 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose
 ## OCR依赖说明
 - 默认本机构建不强制安装 OCR 依赖，避免 macOS 本地构建被 GPU/平台差异卡住。
 - 后端若无 OCR 依赖，上传仍可成功，OCR 状态会是 `failed`，后续在服务器上可重识别。
+
+## 常见故障排查
+- 后端报 `connection to server at "db" ... server closed the connection unexpectedly`：
+  1. 先看数据库日志：`cd stack && ./start.sh logs -f db`
+  2. 若数据库容器反复崩溃，先单独拉起数据库：`./start.sh up -d db`
+  3. 后端已内置数据库连接重试（默认最多 60 次，每次间隔 2 秒），数据库恢复后会自动连上。
+- 若 `db` 日志显示数据目录损坏/版本不兼容（且你可接受清空数据）：
+  1. `./start.sh down`
+  2. 清空 `stack/data/postgres/*`
+  3. `./start.sh up -d`

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
+import time
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import OperationalError
 
 from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine
@@ -12,6 +16,7 @@ from app.routers import auth, invoices, shares, tags
 
 
 app = FastAPI(title=settings.app_name)
+logger = logging.getLogger(__name__)
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,9 +27,33 @@ app.add_middleware(
 )
 
 
+def _wait_for_db_ready() -> None:
+    max_retries = settings.startup_db_max_retries
+    retry_seconds = settings.startup_db_retry_seconds
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            logger.info("Database is ready after %s attempt(s).", attempt)
+            return
+        except OperationalError as exc:
+            if attempt >= max_retries:
+                raise RuntimeError(f"Database not ready after {max_retries} attempts.") from exc
+            logger.warning(
+                "Database not ready (attempt %s/%s). Retry in %ss. Error: %s",
+                attempt,
+                max_retries,
+                retry_seconds,
+                exc,
+            )
+            time.sleep(retry_seconds)
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     settings.ensure_dirs()
+    _wait_for_db_ready()
     Base.metadata.create_all(bind=engine)
 
     db = SessionLocal()

@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     ocr_use_gpu: bool = True
     ocr_lang: str = "ch"
 
+    startup_db_max_retries: int = 60
+    startup_db_retry_seconds: float = 2.0
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False)
 
     @property
