@@ -1,0 +1,3 @@
+# Install with a compatible CUDA wheel source, for example:
+# pip install paddlepaddle-gpu==2.6.2 -f https://www.paddlepaddle.org.cn/packages/stable/cu118/
+# This file is intentionally left as reference to avoid hard-coding a CUDA-specific wheel.

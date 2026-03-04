@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>发票分享页</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="container">
+    <h1 id="share-title">发票分享</h1>
+    <section class="card">
+      <div class="toolbar">
+        <button id="download-zip-btn">下载全部 ZIP</button>
+      </div>
+      <div class="table-wrap top-gap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>文件名</th>
+              <th>公司名</th>
+              <th>发票号码</th>
+              <th>开票日期</th>
+              <th>总金额</th>
+              <th>下载</th>
+            </tr>
+          </thead>
+          <tbody id="share-items-tbody"></tbody>
+        </table>
+      </div>
+      <p id="share-msg" class="hint"></p>
+    </section>
+  </main>
+
+  <script src="/share.js"></script>
+</body>
+</html>

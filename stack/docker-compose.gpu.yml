@@ -1,0 +1,13 @@
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/backend-gpu.Dockerfile
+      args:
+        PADDLE_GPU_PACKAGE: paddlepaddle-gpu==2.6.2
+        PADDLE_WHL_URL: https://www.paddlepaddle.org.cn/packages/stable/cu118/
+    environment:
+      OCR_USE_GPU: "true"
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    runtime: nvidia

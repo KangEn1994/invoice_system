@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>发票管理后台</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="container">
+    <h1>发票管理后台</h1>
+
+    <section id="login-section" class="card">
+      <h2>登录</h2>
+      <form id="login-form" class="grid-2">
+        <label>
+          用户名
+          <input id="username" type="text" required value="admin" />
+        </label>
+        <label>
+          密码
+          <input id="password" type="password" required value="admin123456" />
+        </label>
+        <button type="submit">登录</button>
+      </form>
+      <p id="login-msg" class="hint"></p>
+    </section>
+
+    <section id="app-section" class="hidden">
+      <div class="card toolbar">
+        <div>
+          <strong id="me-label">未登录</strong>
+          <span class="hint inline" id="selected-count">已选择 0 条</span>
+        </div>
+        <button id="logout-btn" class="danger">退出</button>
+      </div>
+
+      <div class="card">
+        <h2>上传发票</h2>
+        <form id="upload-form" class="grid-3">
+          <label>
+            文件
+            <input id="file" type="file" accept=".jpg,.jpeg,.png,.pdf" required />
+          </label>
+          <label>
+            标签（可多选）
+            <select id="upload-tag-ids" multiple></select>
+          </label>
+          <label class="checkbox-line">
+            <input id="auto-ocr" type="checkbox" checked />
+            自动 OCR
+          </label>
+          <button type="submit">上传</button>
+        </form>
+        <p id="upload-msg" class="hint"></p>
+      </div>
+
+      <div class="card">
+        <h2>标签管理</h2>
+        <form id="tag-form" class="inline-form">
+          <input id="new-tag-name" type="text" placeholder="新标签名" required />
+          <button type="submit">新增标签</button>
+        </form>
+        <div id="tag-list" class="tag-list"></div>
+      </div>
+
+      <div class="card">
+        <h2>发票列表</h2>
+        <form id="filter-form" class="grid-3">
+          <input id="filter-q" type="text" placeholder="公司/票号/税号关键词" />
+          <input id="filter-company" type="text" placeholder="公司名" />
+          <input id="filter-number" type="text" placeholder="发票号码" />
+          <label>
+            开票日期从
+            <input id="filter-date-from" type="date" />
+          </label>
+          <label>
+            开票日期到
+            <input id="filter-date-to" type="date" />
+          </label>
+          <label>
+            最小金额
+            <input id="filter-amount-min" type="number" min="0" step="0.01" placeholder="0.00" />
+          </label>
+          <label>
+            最大金额
+            <input id="filter-amount-max" type="number" min="0" step="0.01" placeholder="0.00" />
+          </label>
+          <label>
+            OCR状态
+            <select id="filter-ocr-status">
+              <option value="">全部</option>
+              <option value="success">success</option>
+              <option value="pending">pending</option>
+              <option value="failed">failed</option>
+            </select>
+          </label>
+          <label>
+            标签
+            <select id="filter-tag-id">
+              <option value="">全部标签</option>
+            </select>
+          </label>
+          <label>
+            排序字段
+            <select id="filter-sort-by">
+              <option value="created_at">上传时间</option>
+              <option value="issue_date">开票日期</option>
+              <option value="total_amount">金额</option>
+            </select>
+          </label>
+          <label>
+            排序方向
+            <select id="filter-sort-order">
+              <option value="desc">降序</option>
+              <option value="asc">升序</option>
+            </select>
+          </label>
+          <div class="inline-form align-end">
+            <button type="submit">筛选</button>
+            <button id="reset-filter" type="button">重置</button>
+          </div>
+        </form>
+
+        <div class="inline-form top-gap">
+          <button id="reload-btn" type="button">刷新列表</button>
+          <button id="select-all-btn" type="button">全选当前页</button>
+          <button id="clear-select-btn" type="button">清空选择</button>
+          <select id="batch-tag-ids" multiple></select>
+          <button id="batch-set-tags-btn" type="button">批量覆盖标签</button>
+        </div>
+
+        <div class="inline-form top-gap">
+          <input id="share-title" type="text" placeholder="分享标题" />
+          <button id="create-share-btn" type="button">按已选择生成分享</button>
+          <button id="create-share-from-filter-btn" type="button">按当前筛选全部生成分享</button>
+        </div>
+
+        <div class="table-wrap top-gap">
+          <table>
+            <thead>
+              <tr>
+                <th>选择</th>
+                <th>ID</th>
+                <th>公司名</th>
+                <th>发票号码</th>
+                <th>开票日期</th>
+                <th>项目</th>
+                <th>金额</th>
+                <th>标签</th>
+                <th>OCR</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="invoice-tbody"></tbody>
+          </table>
+        </div>
+        <p id="invoice-msg" class="hint"></p>
+      </div>
+
+      <div class="card">
+        <h2>分享列表</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>标题</th>
+                <th>状态</th>
+                <th>数量</th>
+                <th>链接</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="share-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>分享访问日志</h2>
+        <div class="inline-form">
+          <input id="log-share-id" type="number" min="1" placeholder="按分享ID筛选" />
+          <select id="log-action">
+            <option value="">全部动作</option>
+            <option value="view">view</option>
+            <option value="file">file</option>
+            <option value="zip">zip</option>
+          </select>
+          <button id="load-logs-btn" type="button">加载日志</button>
+        </div>
+
+        <div class="table-wrap top-gap">
+          <table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>分享ID</th>
+                <th>发票ID</th>
+                <th>动作</th>
+                <th>状态码</th>
+                <th>IP</th>
+                <th>User-Agent</th>
+              </tr>
+            </thead>
+            <tbody id="log-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

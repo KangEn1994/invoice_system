@@ -1,0 +1,54 @@
+services:
+  db:
+    image: postgres:16
+    container_name: invoice_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: invoice_system
+      POSTGRES_USER: invoice
+      POSTGRES_PASSWORD: invoice
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U invoice -d invoice_system"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+      args:
+        INSTALL_OCR: "false"
+    container_name: invoice_backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg2://invoice:invoice@db:5432/invoice_system
+      SECRET_KEY: change-this-in-production
+      BOOTSTRAP_ADMIN_USERNAME: admin
+      BOOTSTRAP_ADMIN_PASSWORD: admin123456
+      FILES_DIR: /data/files
+      ZIP_CACHE_DIR: /data/zip_cache
+      PUBLIC_SHARE_BASE_URL: http://localhost:8080
+      CORS_ORIGINS: http://localhost:8080
+      OCR_USE_GPU: "false"
+    volumes:
+      - ./data/files:/data/files
+      - ./data/zip_cache:/data/zip_cache
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/frontend.Dockerfile
+    container_name: invoice_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
