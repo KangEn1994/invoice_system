@@ -16,6 +16,7 @@ from app.core.database import get_db
 from app.deps import get_current_admin
 from app.models import AdminUser, Invoice, Tag, invoice_tags
 from app.schemas import BatchSetInvoiceTagsRequest, InvoiceOut, InvoiceUpdate, PaginatedInvoices, SetInvoiceTagsRequest
+from app.services.file_naming import build_invoice_download_name
 from app.services.invoice_ocr import ocr_service
 
 
@@ -334,7 +335,11 @@ def download_invoice_file(
     if not Path(invoice.file_path).exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文件不存在")
 
-    return FileResponse(path=invoice.file_path, filename=invoice.file_name, media_type=invoice.mime_type)
+    return FileResponse(
+        path=invoice.file_path,
+        filename=build_invoice_download_name(invoice),
+        media_type=invoice.mime_type,
+    )
 
 
 @router.put("/{invoice_id}/tags", response_model=InvoiceOut)

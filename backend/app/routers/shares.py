@@ -25,6 +25,7 @@ from app.schemas import (
     ShareLogOut,
     ShareOut,
 )
+from app.services.file_naming import build_invoice_download_name
 from app.services.share_zip import ensure_share_zip
 
 
@@ -243,7 +244,7 @@ def get_share_detail(
         items.append(
             {
                 "invoice_id": item.invoice_id,
-                "file_name": invoice.file_name,
+                "file_name": build_invoice_download_name(invoice),
                 "company_name": invoice.company_name,
                 "invoice_number": invoice.invoice_number,
                 "issue_date": invoice.issue_date,
@@ -359,7 +360,7 @@ def get_public_share(token: str, request: Request, db: Session = Depends(get_db)
     items = [
         {
             "invoice_id": item.invoice_id,
-            "file_name": item.invoice.file_name,
+            "file_name": build_invoice_download_name(item.invoice),
             "company_name": item.invoice.company_name,
             "invoice_number": item.invoice.invoice_number,
             "issue_date": item.invoice.issue_date,
@@ -394,7 +395,11 @@ def public_download_file(token: str, invoice_id: int, request: Request, db: Sess
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文件不存在")
 
     _log_share_access(db, share_id=share.id, action="file", status_code=200, request=request, invoice_id=invoice_id)
-    return FileResponse(path=target.file_path, filename=target.file_name, media_type=target.mime_type)
+    return FileResponse(
+        path=target.file_path,
+        filename=build_invoice_download_name(target),
+        media_type=target.mime_type,
+    )
 
 
 @public_router.get("/s/{token}/zip")
