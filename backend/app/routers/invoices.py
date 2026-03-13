@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.config import settings
 from app.core.database import get_db
 from app.deps import get_current_admin
-from app.models import AdminUser, Invoice, Tag, invoice_tags
+from app.models import Invoice, Tag, User, invoice_tags
 from app.schemas import BatchSetInvoiceTagsRequest, InvoiceOut, InvoiceUpdate, PaginatedInvoices, SetInvoiceTagsRequest
 from app.services.file_naming import build_invoice_download_name
 from app.services.invoice_ocr import ocr_service
@@ -74,12 +74,19 @@ def _set_invoice_tags(db: Session, invoice: Invoice, tag_ids: list[int]) -> None
     if not tag_ids:
         invoice.tags = []
         return
-    tags = db.scalars(select(Tag).where(Tag.id.in_(tag_ids))).all()
+    unique_ids = list(dict.fromkeys(tag_ids))
+    tags = db.scalars(select(Tag).where(Tag.user_id == invoice.user_id, Tag.id.in_(unique_ids))).all()
+    if len(tags) != len(unique_ids):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="tag_ids 包含不存在的标签")
     invoice.tags = list(tags)
 
 
-def _refresh_invoice(db: Session, invoice_id: int) -> Invoice:
-    invoice = db.scalar(select(Invoice).options(selectinload(Invoice.tags)).where(Invoice.id == invoice_id))
+def _refresh_invoice(db: Session, *, invoice_id: int, user_id: int) -> Invoice:
+    invoice = db.scalar(
+        select(Invoice)
+        .options(selectinload(Invoice.tags))
+        .where(Invoice.id == invoice_id, Invoice.user_id == user_id)
+    )
     if not invoice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票不存在")
     return invoice
@@ -91,7 +98,7 @@ async def upload_invoice(
     auto_ocr: bool = Form(True),
     tag_ids: str | None = Form(default=None),
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ) -> InvoiceOut:
     ext = Path(file.filename or "").suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
@@ -106,6 +113,7 @@ async def upload_invoice(
     saved_path.write_bytes(content)
 
     invoice = Invoice(
+        user_id=current_user.id,
         file_name=file.filename or saved_name,
         file_path=str(saved_path),
         file_ext=ext,
@@ -142,18 +150,16 @@ async def upload_invoice(
 
     db.commit()
 
-    return _refresh_invoice(db, invoice.id)
+    return _refresh_invoice(db, invoice_id=invoice.id, user_id=current_user.id)
 
 
 @router.post("/{invoice_id}/ocr", response_model=InvoiceOut)
 def rerun_ocr(
     invoice_id: int,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ) -> InvoiceOut:
-    invoice = db.get(Invoice, invoice_id)
-    if not invoice:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票不存在")
+    invoice = _refresh_invoice(db, invoice_id=invoice_id, user_id=current_user.id)
 
     ocr_result = ocr_service.run(invoice.file_path)
     invoice.ocr_status = ocr_result["status"]
@@ -176,7 +182,7 @@ def rerun_ocr(
     db.add(invoice)
     db.commit()
 
-    return _refresh_invoice(db, invoice.id)
+    return _refresh_invoice(db, invoice_id=invoice.id, user_id=current_user.id)
 
 
 @router.get("", response_model=PaginatedInvoices)
@@ -196,9 +202,9 @@ def list_invoices(
     tag_ids: str | None = None,
     ocr_status: str | None = None,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ) -> PaginatedInvoices:
-    query = select(Invoice).options(selectinload(Invoice.tags))
+    query = select(Invoice).options(selectinload(Invoice.tags)).where(Invoice.user_id == current_user.id)
     query = _apply_filters(
         query,
         q=q,
@@ -214,7 +220,11 @@ def list_invoices(
 
     parsed_tag_ids = _parse_tag_ids(tag_ids)
     if parsed_tag_ids:
-        query = query.join(invoice_tags, invoice_tags.c.invoice_id == Invoice.id).where(invoice_tags.c.tag_id.in_(parsed_tag_ids))
+        query = (
+            query.join(invoice_tags, invoice_tags.c.invoice_id == Invoice.id)
+            .join(Tag, Tag.id == invoice_tags.c.tag_id)
+            .where(Tag.user_id == current_user.id, Tag.id.in_(parsed_tag_ids))
+        )
 
     query = query.distinct()
 
@@ -242,14 +252,18 @@ def list_invoices(
 def batch_set_invoice_tags(
     payload: BatchSetInvoiceTagsRequest,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ) -> dict:
     invoice_ids = list(dict.fromkeys(payload.invoice_ids))
-    invoices = db.scalars(select(Invoice).where(Invoice.id.in_(invoice_ids))).all()
+    invoices = db.scalars(select(Invoice).where(Invoice.user_id == current_user.id, Invoice.id.in_(invoice_ids))).all()
     if len(invoices) != len(invoice_ids):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invoice_ids 包含不存在的发票")
 
-    tags = db.scalars(select(Tag).where(Tag.id.in_(payload.tag_ids))).all() if payload.tag_ids else []
+    tags = (
+        db.scalars(select(Tag).where(Tag.user_id == current_user.id, Tag.id.in_(payload.tag_ids))).all()
+        if payload.tag_ids
+        else []
+    )
     if payload.tag_ids and len(tags) != len(set(payload.tag_ids)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="tag_ids 包含不存在的标签")
 
@@ -263,7 +277,7 @@ def batch_set_invoice_tags(
 
 @router.get("/ocr/health", response_model=dict)
 def get_ocr_health(
-    _: AdminUser = Depends(get_current_admin),
+    _: User = Depends(get_current_admin),
 ) -> dict:
     return ocr_service.health()
 
@@ -272,9 +286,9 @@ def get_ocr_health(
 def get_invoice(
     invoice_id: int,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ) -> InvoiceOut:
-    return _refresh_invoice(db, invoice_id)
+    return _refresh_invoice(db, invoice_id=invoice_id, user_id=current_user.id)
 
 
 @router.patch("/{invoice_id}", response_model=InvoiceOut)
@@ -282,11 +296,9 @@ def update_invoice(
     invoice_id: int,
     payload: InvoiceUpdate,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ) -> InvoiceOut:
-    invoice = db.get(Invoice, invoice_id)
-    if not invoice:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票不存在")
+    invoice = _refresh_invoice(db, invoice_id=invoice_id, user_id=current_user.id)
 
     data = payload.model_dump(exclude_unset=True)
     for key, value in data.items():
@@ -295,7 +307,7 @@ def update_invoice(
     db.add(invoice)
     db.commit()
 
-    return _refresh_invoice(db, invoice_id)
+    return _refresh_invoice(db, invoice_id=invoice_id, user_id=current_user.id)
 
 
 @router.delete(
@@ -307,11 +319,9 @@ def update_invoice(
 def delete_invoice(
     invoice_id: int,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ) -> Response:
-    invoice = db.get(Invoice, invoice_id)
-    if not invoice:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票不存在")
+    invoice = _refresh_invoice(db, invoice_id=invoice_id, user_id=current_user.id)
 
     file_path = invoice.file_path
     db.delete(invoice)
@@ -326,11 +336,9 @@ def delete_invoice(
 def download_invoice_file(
     invoice_id: int,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
-    invoice = db.get(Invoice, invoice_id)
-    if not invoice:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票不存在")
+    invoice = _refresh_invoice(db, invoice_id=invoice_id, user_id=current_user.id)
 
     if not Path(invoice.file_path).exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文件不存在")
@@ -347,14 +355,12 @@ def set_invoice_tags(
     invoice_id: int,
     payload: SetInvoiceTagsRequest,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ) -> InvoiceOut:
-    invoice = db.get(Invoice, invoice_id)
-    if not invoice:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票不存在")
+    invoice = _refresh_invoice(db, invoice_id=invoice_id, user_id=current_user.id)
 
     _set_invoice_tags(db, invoice, payload.tag_ids)
     db.add(invoice)
     db.commit()
 
-    return _refresh_invoice(db, invoice_id)
+    return _refresh_invoice(db, invoice_id=invoice_id, user_id=current_user.id)

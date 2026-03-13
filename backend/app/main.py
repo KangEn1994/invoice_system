@@ -12,8 +12,9 @@ from sqlalchemy.exc import OperationalError
 
 from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine
+from app.core.migrations import run_migrations
 from app.core.security import get_password_hash
-from app.models import AdminUser, ShareAccessLog
+from app.models import AdminUser, ShareAccessLog, User
 from app.routers import auth, invoices, shares, tags
 
 
@@ -87,22 +88,31 @@ async def on_startup() -> None:
 
     db = SessionLocal()
     try:
-        admin = db.scalar(select(AdminUser).where(AdminUser.username == settings.bootstrap_admin_username))
-        bootstrap_hash = get_password_hash(settings.bootstrap_admin_password)
-        if not admin:
-            db.add(
-                AdminUser(
-                    username=settings.bootstrap_admin_username,
-                    password_hash=bootstrap_hash,
-                    is_active=True,
-                )
-            )
+        legacy_admin = db.scalar(select(AdminUser).where(AdminUser.username == settings.bootstrap_admin_username))
+        if legacy_admin and legacy_admin.password_hash.startswith("$pbkdf2-sha256$"):
+            password_hash = legacy_admin.password_hash
+        else:
+            password_hash = get_password_hash(settings.bootstrap_admin_password)
+            if legacy_admin and not legacy_admin.password_hash.startswith("$pbkdf2-sha256$"):
+                # Keep legacy table usable if it still exists and was using old hashing.
+                legacy_admin.password_hash = password_hash
+                db.add(legacy_admin)
+                db.commit()
+
+        user = db.scalar(select(User).where(User.username == settings.bootstrap_admin_username))
+        if not user:
+            user = User(username=settings.bootstrap_admin_username, password_hash=password_hash, is_active=True)
+            db.add(user)
             db.commit()
-        elif not admin.password_hash.startswith("$pbkdf2-sha256$"):
-            # Migrate legacy password hashes to pbkdf2_sha256 to avoid bcrypt backend compatibility issues.
-            admin.password_hash = bootstrap_hash
-            db.add(admin)
+            db.refresh(user)
+        elif not user.password_hash.startswith("$pbkdf2-sha256$"):
+            # Very old/invalid hashes: reset to bootstrap password to keep login functional.
+            user.password_hash = get_password_hash(settings.bootstrap_admin_password)
+            db.add(user)
             db.commit()
+            db.refresh(user)
+
+        run_migrations(engine, default_user_id=int(user.id))
     finally:
         db.close()
 

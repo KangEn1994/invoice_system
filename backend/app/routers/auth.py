@@ -17,14 +17,14 @@ from app.core.security import (
     verify_password,
 )
 from app.deps import get_current_admin
-from app.models import AdminUser, AuthSession
+from app.models import User, UserSession
 from app.schemas import AdminMeResponse, LoginRequest, LogoutRequest, RefreshRequest, TokenResponse
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _build_token_response(db: Session, user: AdminUser, session: AuthSession) -> TokenResponse:
+def _build_token_response(db: Session, user: User, session: UserSession) -> TokenResponse:
     access_token = create_access_token(user_id=user.id, username=user.username)
     refresh_token = create_refresh_token(session_id=session.id, user_id=user.id)
 
@@ -44,14 +44,14 @@ def _build_token_response(db: Session, user: AdminUser, session: AuthSession) ->
 
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
-    user = db.scalar(select(AdminUser).where(AdminUser.username == payload.username))
+    user = db.scalar(select(User).where(User.username == payload.username))
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
 
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="账号已禁用")
 
-    session = AuthSession(
+    session = UserSession(
         id=uuid.uuid4(),
         user_id=user.id,
         refresh_token_hash="",
@@ -79,7 +79,7 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)) -> TokenResp
     if not session_id or not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="refresh token 无效")
 
-    session = db.get(AuthSession, uuid.UUID(session_id))
+    session = db.get(UserSession, uuid.UUID(session_id))
     if not session or session.revoked_at is not None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="session 已失效")
 
@@ -92,7 +92,7 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)) -> TokenResp
     if session.expires_at <= datetime.now(timezone.utc):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="session 已过期")
 
-    user = db.get(AdminUser, session.user_id)
+    user = db.get(User, session.user_id)
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户无效")
 
@@ -113,7 +113,7 @@ def logout(payload: LogoutRequest, db: Session = Depends(get_db)) -> Response:
         session_id = token_payload.get("sid")
         if not session_id:
             return Response(status_code=status.HTTP_204_NO_CONTENT)
-        session = db.get(AuthSession, uuid.UUID(session_id))
+        session = db.get(UserSession, uuid.UUID(session_id))
         if not session:
             return Response(status_code=status.HTTP_204_NO_CONTENT)
         session.revoked_at = datetime.now(timezone.utc)
@@ -125,5 +125,5 @@ def logout(payload: LogoutRequest, db: Session = Depends(get_db)) -> Response:
 
 
 @router.get("/me", response_model=AdminMeResponse)
-def me(current_admin: AdminUser = Depends(get_current_admin)) -> AdminMeResponse:
-    return AdminMeResponse(id=current_admin.id, username=current_admin.username, role="admin")
+def me(current_user: User = Depends(get_current_admin)) -> AdminMeResponse:
+    return AdminMeResponse(id=current_user.id, username=current_user.username, role="user")

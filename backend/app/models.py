@@ -32,6 +32,35 @@ invoice_tags = Table(
 )
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    sessions: Mapped[list["UserSession"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    invoices: Mapped[list["Invoice"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    tags: Mapped[list["Tag"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    shares: Mapped[list["Share"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    refresh_token_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    user: Mapped[User] = relationship(back_populates="sessions")
+
+
 class AdminUser(Base):
     __tablename__ = "admin_users"
 
@@ -62,6 +91,7 @@ class Invoice(Base):
     __tablename__ = "invoices"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     file_name: Mapped[str] = mapped_column(String(255), nullable=False)
     file_path: Mapped[str] = mapped_column(String(500), nullable=False)
     file_ext: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -85,6 +115,7 @@ class Invoice(Base):
         onupdate=func.now(),
     )
 
+    user: Mapped[User] = relationship(back_populates="invoices")
     tags: Mapped[list[Tag]] = relationship(secondary=invoice_tags, back_populates="invoices")
 
 
@@ -92,9 +123,11 @@ class Tag(Base):
     __tablename__ = "tags"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    name: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
+    user: Mapped[User] = relationship(back_populates="tags")
     invoices: Mapped[list[Invoice]] = relationship(secondary=invoice_tags, back_populates="tags")
 
 
@@ -102,12 +135,16 @@ class Share(Base):
     __tablename__ = "shares"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     token: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    mode: Mapped[str] = mapped_column(String(20), nullable=False, default="static")
+    filters: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    user: Mapped[User] = relationship(back_populates="shares")
     items: Mapped[list[ShareItem]] = relationship(back_populates="share", cascade="all, delete-orphan")
 
 

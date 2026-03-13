@@ -610,9 +610,27 @@ async function loadShareLogs() {
 
 async function handleUpload(evt) {
   evt.preventDefault();
+  const form = document.getElementById('upload-form');
+  const submitBtn = form ? form.querySelector('button[type="submit"]') : null;
+  const originalBtnText = submitBtn ? submitBtn.textContent : '';
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = '上传中...';
+  }
+  if (form) {
+    form.querySelectorAll('input,select').forEach(el => { el.disabled = true; });
+  }
+
   const fileInput = document.getElementById('file');
   if (!fileInput.files || fileInput.files.length === 0) {
     setText('upload-msg', '请选择文件');
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalBtnText || '上传';
+    }
+    if (form) {
+      form.querySelectorAll('input,select').forEach(el => { el.disabled = false; });
+    }
     return;
   }
 
@@ -632,6 +650,14 @@ async function handleUpload(evt) {
     await loadInvoices();
   } catch (e) {
     setText('upload-msg', `上传失败：${e.message}`);
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalBtnText || '上传';
+    }
+    if (form) {
+      form.querySelectorAll('input,select').forEach(el => { el.disabled = false; });
+    }
   }
 }
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import secrets
+from dataclasses import asdict, dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -14,7 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.config import settings
 from app.core.database import get_db
 from app.deps import get_current_admin
-from app.models import AdminUser, Invoice, Share, ShareAccessLog, ShareItem, invoice_tags
+from app.models import Invoice, Share, ShareAccessLog, ShareItem, Tag, User, invoice_tags
 from app.schemas import (
     ShareCreateByFiltersRequest,
     ShareCreateRequest,
@@ -26,7 +27,7 @@ from app.schemas import (
     ShareOut,
 )
 from app.services.file_naming import build_invoice_download_name
-from app.services.share_zip import ensure_share_zip
+from app.services.share_zip import ensure_share_zip, ensure_share_zip_from_invoices
 
 
 router = APIRouter(prefix="/shares", tags=["shares"])
@@ -80,13 +81,71 @@ def _apply_invoice_filters(
     return query
 
 
-def _create_share_with_invoice_ids(db: Session, *, title: str, invoice_ids: list[int]) -> ShareCreateResponse:
+@dataclass(frozen=True)
+class ShareFilters:
+    q: str | None = None
+    company_name: str | None = None
+    invoice_number: str | None = None
+    tax_id: str | None = None
+    date_from: str | None = None
+    date_to: str | None = None
+    amount_min: str | None = None
+    amount_max: str | None = None
+    tag_ids: list[int] | None = None
+    ocr_status: str | None = None
+
+
+def _filters_from_payload(payload: ShareCreateByFiltersRequest) -> ShareFilters:
+    def _d(d: date | None) -> str | None:
+        return d.isoformat() if d else None
+
+    def _dec(x: Decimal | None) -> str | None:
+        return str(x) if x is not None else None
+
+    return ShareFilters(
+        q=payload.q,
+        company_name=payload.company_name,
+        invoice_number=payload.invoice_number,
+        tax_id=payload.tax_id,
+        date_from=_d(payload.date_from),
+        date_to=_d(payload.date_to),
+        amount_min=_dec(payload.amount_min),
+        amount_max=_dec(payload.amount_max),
+        tag_ids=list(payload.tag_ids or []),
+        ocr_status=payload.ocr_status,
+    )
+
+
+def _invoice_query_for_filters(*, user_id: int, filters: ShareFilters) -> Select:
+    query = select(Invoice).where(Invoice.user_id == user_id)
+    query = _apply_invoice_filters(
+        query,
+        q=filters.q,
+        company_name=filters.company_name,
+        invoice_number=filters.invoice_number,
+        tax_id=filters.tax_id,
+        date_from=date.fromisoformat(filters.date_from) if filters.date_from else None,
+        date_to=date.fromisoformat(filters.date_to) if filters.date_to else None,
+        amount_min=Decimal(filters.amount_min) if filters.amount_min is not None else None,
+        amount_max=Decimal(filters.amount_max) if filters.amount_max is not None else None,
+        ocr_status=filters.ocr_status,
+    )
+    if filters.tag_ids:
+        query = (
+            query.join(invoice_tags, invoice_tags.c.invoice_id == Invoice.id)
+            .join(Tag, Tag.id == invoice_tags.c.tag_id)
+            .where(Tag.user_id == user_id, Tag.id.in_(filters.tag_ids))
+        )
+    return query.distinct()
+
+
+def _create_share_with_invoice_ids(db: Session, *, user_id: int, title: str, invoice_ids: list[int]) -> ShareCreateResponse:
     unique_ids = list(dict.fromkeys(invoice_ids))
-    invoices = db.scalars(select(Invoice.id).where(Invoice.id.in_(unique_ids))).all()
+    invoices = db.scalars(select(Invoice.id).where(Invoice.user_id == user_id, Invoice.id.in_(unique_ids))).all()
     if len(invoices) != len(unique_ids):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invoice_ids 包含不存在的发票")
 
-    share = Share(title=title, token=secrets.token_urlsafe(32), status="active")
+    share = Share(user_id=user_id, title=title, token=secrets.token_urlsafe(32), status="active", mode="static", filters=None)
     db.add(share)
     db.flush()
 
@@ -136,10 +195,11 @@ def _log_share_access(
 def create_share(
     payload: ShareCreateRequest,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ) -> ShareCreateResponse:
     return _create_share_with_invoice_ids(
         db=db,
+        user_id=current_user.id,
         title=payload.title,
         invoice_ids=payload.invoice_ids,
     )
@@ -149,34 +209,35 @@ def create_share(
 def create_share_from_filters(
     payload: ShareCreateByFiltersRequest,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ) -> ShareCreateResponse:
-    query = select(Invoice.id)
-    query = _apply_invoice_filters(
-        query,
-        q=payload.q,
-        company_name=payload.company_name,
-        invoice_number=payload.invoice_number,
-        tax_id=payload.tax_id,
-        date_from=payload.date_from,
-        date_to=payload.date_to,
-        amount_min=payload.amount_min,
-        amount_max=payload.amount_max,
-        ocr_status=payload.ocr_status,
-    )
-    if payload.tag_ids:
-        query = query.join(invoice_tags, invoice_tags.c.invoice_id == Invoice.id).where(
-            invoice_tags.c.tag_id.in_(payload.tag_ids)
-        )
-
-    invoice_ids = db.scalars(query.distinct().order_by(Invoice.id.asc())).all()
-    if not invoice_ids:
+    filters = _filters_from_payload(payload)
+    query = select(func.count()).select_from(_invoice_query_for_filters(user_id=current_user.id, filters=filters).subquery())
+    total = int(db.scalar(query) or 0)
+    if total <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前筛选条件没有可分享的发票")
 
-    return _create_share_with_invoice_ids(
-        db=db,
+    share = Share(
+        user_id=current_user.id,
         title=payload.title,
-        invoice_ids=list(invoice_ids),
+        token=secrets.token_urlsafe(32),
+        status="active",
+        mode="dynamic",
+        filters=asdict(filters),
+    )
+    db.add(share)
+    db.commit()
+    db.refresh(share)
+
+    return ShareCreateResponse(
+        id=share.id,
+        title=share.title,
+        token=share.token,
+        status=share.status,
+        created_at=share.created_at,
+        revoked_at=share.revoked_at,
+        share_url=_share_url(share.token),
+        item_count=total,
     )
 
 
@@ -186,7 +247,7 @@ def list_shares(
     page_size: int = Query(default=20, ge=1, le=100),
     status_filter: str | None = Query(default=None, alias="status"),
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ) -> ShareListResponse:
     count_subq = (
         select(ShareItem.share_id, func.count(ShareItem.id).label("item_count"))
@@ -198,6 +259,7 @@ def list_shares(
         count_subq, count_subq.c.share_id == Share.id
     )
 
+    query = query.where(Share.user_id == current_user.id)
     if status_filter:
         query = query.where(Share.status == status_filter)
 
@@ -208,18 +270,29 @@ def list_shares(
 
     rows = db.execute(query.offset(offset).limit(page_size)).all()
 
-    items = [
-        ShareListItem(
-            id=row[0].id,
-            title=row[0].title,
-            token=row[0].token,
-            status=row[0].status,
-            item_count=int(row[1] or 0),
-            created_at=row[0].created_at,
-            revoked_at=row[0].revoked_at,
+    items: list[ShareListItem] = []
+    for row in rows:
+        share: Share = row[0]
+        static_count = int(row[1] or 0)
+        item_count = static_count
+        if getattr(share, "mode", "static") == "dynamic" and share.filters:
+            try:
+                filters = ShareFilters(**share.filters)
+                count_q = select(func.count()).select_from(_invoice_query_for_filters(user_id=current_user.id, filters=filters).subquery())
+                item_count = int(db.scalar(count_q) or 0)
+            except Exception:
+                item_count = 0
+        items.append(
+            ShareListItem(
+                id=share.id,
+                title=share.title,
+                token=share.token,
+                status=share.status,
+                item_count=item_count,
+                created_at=share.created_at,
+                revoked_at=share.revoked_at,
+            )
         )
-        for row in rows
-    ]
 
     return ShareListResponse(items=items, page=page, page_size=page_size, total=total)
 
@@ -228,29 +301,44 @@ def list_shares(
 def get_share_detail(
     share_id: int,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ):
     share = db.scalar(
         select(Share)
         .options(selectinload(Share.items).selectinload(ShareItem.invoice))
-        .where(Share.id == share_id)
+        .where(Share.id == share_id, Share.user_id == current_user.id)
     )
     if not share:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分享不存在")
 
-    items = []
-    for item in share.items:
-        invoice = item.invoice
-        items.append(
-            {
-                "invoice_id": item.invoice_id,
-                "file_name": build_invoice_download_name(invoice),
-                "company_name": invoice.company_name,
-                "invoice_number": invoice.invoice_number,
-                "issue_date": invoice.issue_date,
-                "total_amount": invoice.total_amount,
-            }
-        )
+    items: list[dict] = []
+    if getattr(share, "mode", "static") == "dynamic" and share.filters:
+        filters = ShareFilters(**share.filters)
+        invoices = db.scalars(_invoice_query_for_filters(user_id=current_user.id, filters=filters).order_by(Invoice.id.asc())).all()
+        for invoice in invoices:
+            items.append(
+                {
+                    "invoice_id": invoice.id,
+                    "file_name": build_invoice_download_name(invoice),
+                    "company_name": invoice.company_name,
+                    "invoice_number": invoice.invoice_number,
+                    "issue_date": invoice.issue_date,
+                    "total_amount": invoice.total_amount,
+                }
+            )
+    else:
+        for item in share.items:
+            invoice = item.invoice
+            items.append(
+                {
+                    "invoice_id": item.invoice_id,
+                    "file_name": build_invoice_download_name(invoice),
+                    "company_name": invoice.company_name,
+                    "invoice_number": invoice.invoice_number,
+                    "issue_date": invoice.issue_date,
+                    "total_amount": invoice.total_amount,
+                }
+            )
 
     return {
         "id": share.id,
@@ -269,10 +357,10 @@ def get_share_detail(
 def revoke_share(
     share_id: int,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ) -> ShareOut:
     share = db.get(Share, share_id)
-    if not share:
+    if not share or share.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分享不存在")
 
     if share.status != "revoked":
@@ -297,10 +385,10 @@ def revoke_share(
 def delete_share(
     share_id: int,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ) -> Response:
     share = db.get(Share, share_id)
-    if not share:
+    if not share or share.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分享不存在")
 
     cache_file = Path(settings.zip_cache_dir) / f"share_{share.id}.zip"
@@ -319,9 +407,9 @@ def list_share_logs(
     share_id: int | None = None,
     action: str | None = None,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ) -> ShareLogListResponse:
-    query = select(ShareAccessLog)
+    query = select(ShareAccessLog).join(Share, Share.id == ShareAccessLog.share_id).where(Share.user_id == current_user.id)
     if share_id is not None:
         query = query.where(ShareAccessLog.share_id == share_id)
     if action:
@@ -357,17 +445,33 @@ def get_public_share(token: str, request: Request, db: Session = Depends(get_db)
             _log_share_access(db, share_id=share.id, action="view", status_code=404, request=request)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分享不存在或已失效")
 
-    items = [
-        {
-            "invoice_id": item.invoice_id,
-            "file_name": build_invoice_download_name(item.invoice),
-            "company_name": item.invoice.company_name,
-            "invoice_number": item.invoice.invoice_number,
-            "issue_date": item.invoice.issue_date,
-            "total_amount": item.invoice.total_amount,
-        }
-        for item in share.items
-    ]
+    items: list[dict] = []
+    if getattr(share, "mode", "static") == "dynamic" and share.filters:
+        filters = ShareFilters(**share.filters)
+        invoices = db.scalars(_invoice_query_for_filters(user_id=int(share.user_id), filters=filters).order_by(Invoice.id.asc())).all()
+        for invoice in invoices:
+            items.append(
+                {
+                    "invoice_id": invoice.id,
+                    "file_name": build_invoice_download_name(invoice),
+                    "company_name": invoice.company_name,
+                    "invoice_number": invoice.invoice_number,
+                    "issue_date": invoice.issue_date,
+                    "total_amount": invoice.total_amount,
+                }
+            )
+    else:
+        items = [
+            {
+                "invoice_id": item.invoice_id,
+                "file_name": build_invoice_download_name(item.invoice),
+                "company_name": item.invoice.company_name,
+                "invoice_number": item.invoice.invoice_number,
+                "issue_date": item.invoice.issue_date,
+                "total_amount": item.invoice.total_amount,
+            }
+            for item in share.items
+        ]
 
     _log_share_access(db, share_id=share.id, action="view", status_code=200, request=request)
     return {"title": share.title, "items": items}
@@ -385,10 +489,20 @@ def public_download_file(token: str, invoice_id: int, request: Request, db: Sess
             _log_share_access(db, share_id=share.id, action="file", status_code=404, request=request, invoice_id=invoice_id)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分享不存在或已失效")
 
-    target = next((item.invoice for item in share.items if item.invoice_id == invoice_id), None)
-    if not target:
-        _log_share_access(db, share_id=share.id, action="file", status_code=404, request=request, invoice_id=invoice_id)
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票不在分享中")
+    target: Invoice | None = None
+    if getattr(share, "mode", "static") == "dynamic" and share.filters:
+        filters = ShareFilters(**share.filters)
+        target = db.scalar(
+            _invoice_query_for_filters(user_id=int(share.user_id), filters=filters).where(Invoice.id == invoice_id)
+        )
+        if not target:
+            _log_share_access(db, share_id=share.id, action="file", status_code=404, request=request, invoice_id=invoice_id)
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票不在分享中")
+    else:
+        target = next((item.invoice for item in share.items if item.invoice_id == invoice_id), None)
+        if not target:
+            _log_share_access(db, share_id=share.id, action="file", status_code=404, request=request, invoice_id=invoice_id)
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="发票不在分享中")
 
     if not Path(target.file_path).exists():
         _log_share_access(db, share_id=share.id, action="file", status_code=404, request=request, invoice_id=invoice_id)
@@ -414,7 +528,12 @@ def public_download_zip(token: str, request: Request, db: Session = Depends(get_
             _log_share_access(db, share_id=share.id, action="zip", status_code=404, request=request)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分享不存在或已失效")
 
-    zip_path = ensure_share_zip(share, settings.zip_cache_dir)
+    if getattr(share, "mode", "static") == "dynamic" and share.filters:
+        filters = ShareFilters(**share.filters)
+        invoices = db.scalars(_invoice_query_for_filters(user_id=int(share.user_id), filters=filters).order_by(Invoice.id.asc())).all()
+        zip_path = ensure_share_zip_from_invoices(share_id=int(share.id), invoices=invoices, zip_cache_dir=settings.zip_cache_dir)
+    else:
+        zip_path = ensure_share_zip(share, settings.zip_cache_dir)
     _log_share_access(db, share_id=share.id, action="zip", status_code=200, request=request)
 
     return FileResponse(path=zip_path, filename=f"share_{share.id}.zip", media_type="application/zip")

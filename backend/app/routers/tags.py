@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.deps import get_current_admin
-from app.models import AdminUser, Tag
+from app.models import Tag, User
 from app.schemas import TagCreate, TagOut, TagUpdate
 
 
@@ -18,9 +18,9 @@ router = APIRouter(prefix="/tags", tags=["tags"])
 def list_tags(
     q: str | None = Query(default=None),
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ) -> list[TagOut]:
-    query = select(Tag)
+    query = select(Tag).where(Tag.user_id == current_user.id)
     if q:
         query = query.where(Tag.name.ilike(f"%{q}%"))
     query = query.order_by(Tag.name.asc())
@@ -31,9 +31,9 @@ def list_tags(
 def create_tag(
     payload: TagCreate,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ) -> TagOut:
-    tag = Tag(name=payload.name.strip())
+    tag = Tag(user_id=current_user.id, name=payload.name.strip())
     db.add(tag)
     try:
         db.commit()
@@ -49,10 +49,10 @@ def update_tag(
     tag_id: int,
     payload: TagUpdate,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ) -> TagOut:
     tag = db.get(Tag, tag_id)
-    if not tag:
+    if not tag or tag.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="标签不存在")
 
     tag.name = payload.name.strip()
@@ -77,10 +77,10 @@ def update_tag(
 def delete_tag(
     tag_id: int,
     db: Session = Depends(get_db),
-    _: AdminUser = Depends(get_current_admin),
+    current_user: User = Depends(get_current_admin),
 ) -> Response:
     tag = db.get(Tag, tag_id)
-    if not tag:
+    if not tag or tag.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="标签不存在")
 
     db.delete(tag)
