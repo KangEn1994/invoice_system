@@ -85,6 +85,22 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 - `BOOTSTRAP_ADMIN_PASSWORD` 用于初始化默认管理员账号。
 - 若数据库里该管理员已经存在且密码已是新哈希格式，修改 `stack/.env` 后不会自动覆盖旧密码。
 
+## 创建新用户（脚本）
+脚本位置：`backend/scripts/create_user.py`
+
+在服务器（或本机）通过容器执行：
+```bash
+cd stack
+./start.sh exec backend python -m app.core.config >/dev/null 2>&1 || true
+./start.sh exec backend sh -lc "PYTHONPATH=/app python /app/scripts/create_user.py --username alice"
+```
+
+如果用户已存在并要重置密码：
+```bash
+cd stack
+./start.sh exec backend sh -lc "PYTHONPATH=/app python /app/scripts/create_user.py --username alice --update-if-exists"
+```
+
 ## CI/CD（GitHub Actions）
 仓库已内置两条工作流：
 - CI: `.github/workflows/ci.yml`
