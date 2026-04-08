@@ -166,8 +166,9 @@ class InvoiceOCRService:
 
     def _extract_fields(self, text: str) -> dict[str, Any]:
         normalized = self._normalize_text(text)
+        railway_fields = self._extract_railway_ticket_fields(normalized)
 
-        company_name = self._find_first(
+        company_name = railway_fields.get("company_name") or self._find_first(
             normalized,
             [
                 r"(?:购买方|购方|销方|销售方)?名称\s*:?\s*([^\n]{2,80})",
@@ -177,9 +178,9 @@ class InvoiceOCRService:
         if company_name:
             company_name = company_name.strip(" _-:")
 
-        tax_id = self._extract_tax_id(normalized)
+        tax_id = railway_fields.get("tax_id") or self._extract_tax_id(normalized)
 
-        invoice_number = self._find_first(
+        invoice_number = railway_fields.get("invoice_number") or self._find_first(
             normalized,
             [
                 r"发票号码\s*:?\s*([0-9]{6,20})",
@@ -187,11 +188,11 @@ class InvoiceOCRService:
             ],
         )
 
-        issue_date = self._extract_issue_date(normalized)
-        item_name = self._extract_item_name(normalized)
-        total_amount = self._extract_amount(normalized)
+        issue_date = railway_fields.get("issue_date") or self._extract_issue_date(normalized)
+        item_name = railway_fields.get("item_name") or self._extract_item_name(normalized)
+        total_amount = railway_fields.get("total_amount") or self._extract_amount(normalized)
 
-        return {
+        fields = {
             "company_name": company_name,
             "tax_id": tax_id,
             "invoice_number": invoice_number,
@@ -199,6 +200,22 @@ class InvoiceOCRService:
             "item_name": item_name,
             "total_amount": total_amount,
         }
+        if railway_fields:
+            fields.update(
+                {
+                    "document_type": "railway_ticket",
+                    "ticket_number": railway_fields.get("ticket_number"),
+                    "departure_station": railway_fields.get("departure_station"),
+                    "arrival_station": railway_fields.get("arrival_station"),
+                    "train_number": railway_fields.get("train_number"),
+                    "travel_date": railway_fields.get("travel_date"),
+                    "departure_time": railway_fields.get("departure_time"),
+                    "seat_type": railway_fields.get("seat_type"),
+                    "seat_number": railway_fields.get("seat_number"),
+                    "passenger_name": railway_fields.get("passenger_name"),
+                }
+            )
+        return fields
 
     def _find_first(self, text: str, patterns: list[str]) -> str | None:
         for pattern in patterns:
@@ -259,12 +276,130 @@ class InvoiceOCRService:
         if not date_text:
             return None
 
-        cleaned = date_text.replace("年", "-").replace("月", "-").replace("日", "").replace("/", "-")
+        return self._parse_date_text(date_text)
+
+    def _parse_date_text(self, raw: str) -> str | None:
+        cleaned = (raw or "").replace("年", "-").replace("月", "-").replace("日", "").replace("/", "-")
         try:
             dt = datetime.strptime(cleaned, "%Y-%m-%d")
             return dt.date().isoformat()
         except ValueError:
             return None
+
+    def _is_railway_ticket(self, text: str) -> bool:
+        keywords = ["铁路电子客票", "电子客票号", "买票请到12306", "中国铁路"]
+        if any(keyword in text for keyword in keywords):
+            return True
+
+        station_matches = re.findall(r"([\u4e00-\u9fff]{2,20}站)", text)
+        has_train_number = bool(re.search(r"(?<![A-Z0-9])([GDCZTKYSLP]\d{1,5})(?![A-Z0-9])", text, flags=re.IGNORECASE))
+        return len(station_matches) >= 2 and has_train_number
+
+    def _extract_railway_ticket_fields(self, text: str) -> dict[str, Any]:
+        if not self._is_railway_ticket(text):
+            return {}
+
+        stations = self._extract_railway_stations(text)
+        departure_station = stations[0] if len(stations) >= 1 else None
+        arrival_station = stations[1] if len(stations) >= 2 else None
+        train_number = self._find_first(
+            text,
+            [r"(?<![A-Z0-9])([GDCZTKYSLP]\d{1,5})(?![A-Z0-9])"],
+        )
+        seat_type = self._find_first(
+            text,
+            [r"(商务座|特等座|一等座|二等座|软卧|硬卧|软座|硬座|无座|高级软卧|动卧|二等卧|一等卧)"],
+        )
+        seat_number = self._find_first(
+            text,
+            [
+                r"(\d{1,2}车\d{1,3}[A-Z]号?)",
+                r"(\d{1,3}[A-Z]号)",
+            ],
+        )
+        departure_time = self._find_first(text, [r"(\d{1,2}:\d{2})\s*开"])
+        travel_date_text = self._find_first(
+            text,
+            [
+                r"((?:19|20)\d{2}[年\-/]\d{1,2}[月\-/]\d{1,2}日?)\s+\d{1,2}:\d{2}\s*开",
+                r"乘车日期\s*:?\s*((?:19|20)\d{2}[年\-/]\d{1,2}[月\-/]\d{1,2}日?)",
+            ],
+        )
+        company_name = self._find_first(text, [r"购买方名称\s*:?\s*([^\n]{2,80})"])
+        if company_name:
+            company_name = company_name.strip(" _-:")
+
+        tax_id = self._extract_tax_id(text)
+        invoice_number = self._find_first(text, [r"发票号码\s*:?\s*([0-9]{6,20})"])
+        ticket_number = self._find_first(text, [r"电子客票号\s*:?\s*([0-9A-Z]{10,40})"])
+        price_text = self._find_first(text, [r"票价\s*[:：]?\s*([¥￥]?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?)"])
+        total_amount = None
+        if price_text:
+            parsed_amount = self._parse_amount(price_text)
+            if parsed_amount is not None:
+                total_amount = str(parsed_amount.quantize(Decimal("0.01")))
+
+        passenger_name = self._extract_railway_passenger_name(text)
+
+        item_parts = []
+        route_text = None
+        if departure_station and arrival_station:
+            route_text = f"{departure_station}->{arrival_station}"
+            item_parts.append(route_text)
+        elif departure_station:
+            item_parts.append(departure_station)
+        if train_number:
+            item_parts.append(train_number)
+        if seat_type:
+            item_parts.append(seat_type)
+        if seat_number:
+            item_parts.append(seat_number)
+        if departure_time:
+            item_parts.append(f"{departure_time}开")
+
+        item_name = None
+        if item_parts:
+            item_name = ("铁路电子客票 " + " ".join(item_parts)).strip()[:255]
+
+        return {
+            "company_name": company_name,
+            "tax_id": tax_id,
+            "invoice_number": invoice_number,
+            "issue_date": self._extract_issue_date(text),
+            "item_name": item_name,
+            "total_amount": total_amount,
+            "ticket_number": ticket_number,
+            "departure_station": departure_station,
+            "arrival_station": arrival_station,
+            "train_number": train_number,
+            "travel_date": self._parse_date_text(travel_date_text) if travel_date_text else None,
+            "departure_time": departure_time,
+            "seat_type": seat_type,
+            "seat_number": seat_number,
+            "passenger_name": passenger_name,
+        }
+
+    def _extract_railway_stations(self, text: str) -> list[str]:
+        stations: list[str] = []
+        seen: set[str] = set()
+        for match in re.finditer(r"([\u4e00-\u9fff]{2,20}站)", text):
+            station = match.group(1)
+            if station in seen:
+                continue
+            seen.add(station)
+            stations.append(station)
+        return stations
+
+    def _extract_railway_passenger_name(self, text: str) -> str | None:
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        id_like_line = re.compile(r"\d{6,}\*{2,}[0-9Xx]{2,}")
+        for idx, line in enumerate(lines):
+            if not id_like_line.search(line):
+                continue
+            for candidate in lines[idx + 1 : idx + 3]:
+                if re.fullmatch(r"[\u4e00-\u9fff]{2,10}", candidate):
+                    return candidate
+        return None
 
     def _extract_item_name(self, text: str) -> str | None:
         for line in text.splitlines():
@@ -298,6 +433,7 @@ class InvoiceOCRService:
             (r"\(小写\)\s*[:：]?\s*([¥￥]?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?)", 110),
             (r"总金额\s*[:：]?\s*([¥￥]?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?)", 100),
             (r"金额合计\s*[:：]?\s*([¥￥]?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?)", 95),
+            (r"票价\s*[:：]?\s*([¥￥]?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?)", 95),
             (r"合计\s*[:：]?\s*([¥￥]?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?)", 80),
             (r"总计\s*[:：]?\s*([¥￥]?\s*[0-9][0-9,]*(?:\.[0-9]{1,2})?)", 80),
         ]:
@@ -314,7 +450,7 @@ class InvoiceOCRService:
             line_score = 0
             if any(k in stripped for k in ["价税合计", "小写"]):
                 line_score = 90
-            elif any(k in stripped for k in ["总金额", "金额合计", "合计", "总计"]):
+            elif any(k in stripped for k in ["总金额", "金额合计", "票价", "合计", "总计"]):
                 line_score = 70
             elif "¥" in stripped or "￥" in stripped:
                 line_score = 45

@@ -222,6 +222,27 @@ function parseIdListInput(raw) {
   return text.split(',').map(part => Number(part.trim())).filter(x => Number.isInteger(x) && x > 0);
 }
 
+async function renameTag(tag) {
+  const raw = prompt('请输入新的标签名称', tag.name || '');
+  if (raw === null) return;
+
+  const name = raw.trim();
+  if (!name) {
+    alert('标签名不能为空');
+    return;
+  }
+  if (name === tag.name) return;
+
+  await apiFetch(`/api/tags/${tag.id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+
+  await loadTags();
+  await loadInvoices();
+}
+
 async function loadTags() {
   const resp = await apiFetch('/api/tags');
   state.tags = await resp.json();
@@ -247,9 +268,23 @@ function renderTagOptions() {
   tagList.innerHTML = state.tags.map(tag => `
     <span class="tag-chip">
       ${escapeHtml(tag.name)} (#${tag.id})
+      <button data-edit-tag="${tag.id}" class="small" type="button">改名</button>
       <button data-del-tag="${tag.id}" class="small danger" type="button">删</button>
     </span>
   `).join('');
+
+  document.querySelectorAll('[data-edit-tag]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = Number(btn.getAttribute('data-edit-tag'));
+      const tag = state.tags.find(item => item.id === id);
+      if (!tag) return;
+      try {
+        await renameTag(tag);
+      } catch (e) {
+        alert(`修改标签失败：${e.message}`);
+      }
+    });
+  });
 
   document.querySelectorAll('[data-del-tag]').forEach(btn => {
     btn.addEventListener('click', async () => {
